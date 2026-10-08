@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="620" viewBox="0 0 1500 620" role="img" aria-labelledby="title desc">
+<title id="title">采集任务：批量岗位工作流预览</title>
+<desc id="desc">纵轴为批量处理容量，横轴为时间；多条岗位按相同阶段对齐，采集结束后由人工审核、修改并发送招呼。</desc>
+<style>text{font-family:"PingFang SC","Microsoft YaHei",sans-serif}.heading{font-size:26px;font-weight:700;fill:#263A55}.sub{font-size:13px;fill:#647A94}.axis{font-size:14px;fill:#4D6481}.row{font-size:13px;font-weight:700;fill:#3B526E}.phase{font-size:12px;font-weight:700}.manual{font-size:18px;font-weight:700;fill:#725AAB}.hint{font-size:12px;fill:#72869C}</style>
+<rect x="1" y="1" width="1498" height="618" rx="18" fill="white" stroke="#DAE5F0"/>
+<text class="heading" x="34" y="47">采集任务 · 批量岗位时间线</text>
+<text class="sub" x="34" y="76">每一行代表一条岗位；相同阶段对齐，展示一轮采集如何批量处理岗位。</text>
+<rect x="25" y="106" width="1450" height="480" rx="16" fill="#F8FBFF" stroke="#E0EAF4"/>
+<text class="sub" x="38" y="139">推荐流 · 1 组期望  ·  每组最多 1 页  ·  本轮岗位上限：不限  ·  AI 评分：开启（最多 100 路并发，门槛 71 分）  ·  自动生成招呼：关闭</text>
+<line x1="105" y1="530" x2="105" y2="170" stroke="#6B829D" stroke-width="2"/>
+<path d="M 100 178 L 105 166 L 110 178 Z" fill="#6B829D"/>
+<line x1="105" y1="530" x2="1435" y2="530" stroke="#6B829D" stroke-width="2"/>
+<path d="M 1424 525 L 1437 530 L 1424 535 Z" fill="#6B829D"/>
+<text class="axis" x="30" y="165">批量处理容量</text>
+<text class="axis" x="76" y="192" text-anchor="end">不限</text>
+<text class="axis" x="92" y="535" text-anchor="end">0</text>
+<text class="axis" x="1448" y="535">时间</text>
+<line x1="820" y1="165" x2="820" y2="530" stroke="#8CA1B8" stroke-width="2" stroke-dasharray="7 6"/>
+<text class="axis" x="820" y="158" text-anchor="middle">采集结束</text>
+<text class="axis" x="470" y="365" text-anchor="middle">···</text>
+<text class="row" x="130" y="210">岗位 1</text>
+<rect x="180" y="183" width="150" height="44" fill="#E6F2FF" stroke="#4183CF" stroke-width="1"/>
+<text class="phase" x="255.0" y="210" text-anchor="middle" fill="#4183CF">数据抓取</text>
+<rect x="330" y="183" width="125" height="44" fill="#FFF0D8" stroke="#C38731" stroke-width="1"/>
+<text class="phase" x="392.5" y="210" text-anchor="middle" fill="#C38731">预筛</text>
+<rect x="455" y="183" width="145" height="44" fill="#ECEBFF" stroke="#6B63BD" stroke-width="1"/>
+<text class="phase" x="527.5" y="210" text-anchor="middle" fill="#6B63BD">AI 评分</text>
+<rect x="600" y="183" width="155" height="44" fill="#F1F4F7" stroke="#9AA9B9" stroke-width="1" stroke-dasharray="5 3"/>
+<text class="phase" x="677.5" y="210" text-anchor="middle" fill="#9AA9B9">生成招呼</text>
+<text class="row" x="130" y="290">岗位 2</text>
+<rect x="180" y="263" width="150" height="44" fill="#E6F2FF" stroke="#4183CF" stroke-width="1"/>
+<text class="phase" x="255.0" y="290" text-anchor="middle" fill="#4183CF">数据抓取</text>
+<rect x="330" y="263" width="125" height="44" fill="#FFF0D8" stroke="#C38731" stroke-width="1"/>
+<text class="phase" x="392.5" y="290" text-anchor="middle" fill="#C38731">预筛</text>
+<rect x="455" y="263" width="145" height="44" fill="#ECEBFF" stroke="#6B63BD" stroke-width="1"/>
+<text class="phase" x="527.5" y="290" text-anchor="middle" fill="#6B63BD">AI 评分</text>
+<rect x="600" y="263" width="155" height="44" fill="#F1F4F7" stroke="#9AA9B9" stroke-width="1" stroke-dasharray="5 3"/>
+<text class="phase" x="677.5" y="290" text-anchor="middle" fill="#9AA9B9">生成招呼</text>
+<text class="row" x="130" y="430">后续岗位</text>
+<rect x="180" y="403" width="150" height="44" fill="#E6F2FF" stroke="#4183CF" stroke-width="1"/>
+<text class="phase" x="255.0" y="430" text-anchor="middle" fill="#4183CF">数据抓取</text>
+<rect x="330" y="403" width="125" height="44" fill="#FFF0D8" stroke="#C38731" stroke-width="1"/>
+<text class="phase" x="392.5" y="430" text-anchor="middle" fill="#C38731">预筛</text>
+<rect x="455" y="403" width="145" height="44" fill="#ECEBFF" stroke="#6B63BD" stroke-width="1"/>
+<text class="phase" x="527.5" y="430" text-anchor="middle" fill="#6B63BD">AI 评分</text>
+<rect x="600" y="403" width="155" height="44" fill="#F1F4F7" stroke="#9AA9B9" stroke-width="1" stroke-dasharray="5 3"/>
+<text class="phase" x="677.5" y="430" text-anchor="middle" fill="#9AA9B9">生成招呼</text>
+<text class="manual" x="1120" y="300" text-anchor="middle">人工审核、修改、发送招呼</text>
+<line x1="910" y1="330" x2="1350" y2="330" stroke="#725AAB" stroke-width="3"/>
+<path d="M 1338 322 L 1354 330 L 1338 338 Z" fill="#725AAB"/>
+<text class="hint" x="190" y="560">横条按流程对齐；实际逐条抓取，AI 评分可与后续岗位抓取并发。</text>
+<text class="hint" x="34" y="604">图中只示意进入人工处理的岗位；预筛未通过的岗位退出，低分岗位默认过滤（可手动放行）。灰色虚线阶段表示未启用。</text>
+</svg>

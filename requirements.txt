@@ -1,0 +1,3 @@
+patchright>=1.55
+httpx>=0.27
+fonttools>=4.0

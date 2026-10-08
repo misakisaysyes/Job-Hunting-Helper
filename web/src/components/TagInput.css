@@ -1,0 +1,72 @@
+.tag-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 9px;
+  min-height: 43px;
+  padding: 7px 9px;
+  border: 1px solid #c9d9eb;
+  border-radius: 9px;
+  background: #fff;
+  cursor: text;
+}
+
+.tag-input:focus-within {
+  border-color: #79b6f8;
+  box-shadow: 0 0 0 3px #e5f2ff;
+}
+
+.tag-input-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 29px;
+  padding: 5px 25px 5px 10px;
+  border: 1px solid #afd3fa;
+  border-radius: 7px;
+  background: #e8f3ff;
+  color: #176bc0;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  cursor: default;
+}
+
+.tag-input-chip button {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #478ccf;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.tag-input-chip button:hover,
+.tag-input-chip button:focus-visible {
+  background: #cbe5ff;
+  color: #075ca9;
+}
+
+.tag-input input {
+  flex: 1 1 130px;
+  width: 130px;
+  min-width: 100px;
+  padding: 5px 3px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #263247;
+  font: inherit;
+  font-size: 12px;
+}

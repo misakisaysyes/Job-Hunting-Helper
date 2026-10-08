@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "找岗位：从发现到打招呼",
+    "quality_profile": "showcase",
+    "viewBox": [860, 520],
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "external": { "label": "岗位来源" },
+        "backend": { "label": "系统处理与状态" },
+        "security": { "label": "规则判断" },
+        "frontend": { "label": "用户选择" }
+      }
+    }
+  },
+  "lanes": [
+    { "id": "source", "label": "岗位来源" },
+    { "id": "system", "label": "系统处理" },
+    { "id": "human", "label": "用户决定" }
+  ],
+  "mainPath": ["boss", "collect", "prefilter", "ai_enabled", "threshold", "greet"],
+  "nodes": [
+    { "id": "boss", "lane": "source", "col": 0, "type": "external", "label": "BOSS 岗位", "sublabel": "推荐流 / 搜索流", "tag": "来源" },
+    { "id": "collect", "lane": "system", "col": 1, "type": "backend", "label": "抓取", "sublabel": "岗位", "tag": "行动", "width": 48 },
+    { "id": "prefilter", "lane": "system", "col": 2, "type": "security", "label": "预筛", "sublabel": "通过？", "tag": "判断", "width": 48 },
+    { "id": "ai_enabled", "lane": "system", "col": 3, "type": "security", "label": "AI", "sublabel": "评分", "tag": "可选", "width": 36 },
+    { "id": "threshold", "lane": "system", "col": 4, "type": "security", "label": "门槛", "sublabel": "达标？", "tag": "判断", "width": 48 },
+    { "id": "filtered", "lane": "human", "col": 4, "type": "backend", "label": "已过滤", "tag": "状态", "width": 48 },
+    { "id": "override", "lane": "human", "col": 5, "type": "frontend", "label": "人工", "sublabel": "选择", "tag": "判断", "width": 48 },
+    { "id": "greet", "lane": "system", "col": 5, "type": "backend", "label": "打招呼", "tag": "行动", "width": 60 }
+  ],
+  "edges": [
+    { "from": "boss", "to": "collect" },
+    { "from": "collect", "to": "prefilter" },
+    { "from": "prefilter", "to": "ai_enabled" },
+    { "from": "prefilter", "to": "filtered", "label": "未通过", "role": "branch", "fromSide": "bottom", "toSide": "left" },
+    { "from": "ai_enabled", "to": "threshold", "route": "straight", "fromSide": "right", "toSide": "left" },
+    { "from": "ai_enabled", "to": "greet", "label": "未启用", "role": "branch", "route": "up-channel", "fromSide": "top", "toSide": "top", "channelY": 155 },
+    { "from": "threshold", "to": "greet" },
+    { "from": "threshold", "to": "filtered", "label": "低于门槛", "role": "branch", "route": "straight", "fromSide": "bottom", "toSide": "top", "labelAt": [500, 291] },
+    { "from": "filtered", "to": "override", "route": "straight", "fromSide": "right", "toSide": "left" },
+    { "from": "override", "to": "greet", "label": "仍去招呼", "role": "branch", "route": "straight", "fromSide": "top", "toSide": "bottom" }
+  ]
+}

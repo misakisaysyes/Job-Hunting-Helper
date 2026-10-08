@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1720" height="1190" viewBox="0 0 1720 1190">
+<rect width="1720" height="1190" fill="#f6f8fb"/>
+<rect x="0" y="0" width="280" height="1500" rx="0" fill="#ffffff"/>
+<line x1="280" y1="0" x2="280" y2="1500" stroke="#e2e9f2" stroke-width="1"/>
+<rect x="23" y="18" width="36" height="36" rx="10" fill="#1978e6"/>
+<text x="41" y="43" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="21" font-weight="700" fill="#ffffff" text-anchor="middle">J</text>
+<text x="72" y="42" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="15" font-weight="730" fill="#24334c" text-anchor="start">Job Hunting Helper</text>
+<line x1="0" y1="72" x2="280" y2="72" stroke="#e2e9f2" stroke-width="1"/>
+<rect x="16" y="106" width="248" height="44" rx="10" fill="#f3f7fc"/>
+<text x="36" y="135" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="14" font-weight="700" fill="#24334c" text-anchor="start">工作台</text>
+<line x1="43" y1="159" x2="43" y2="245" stroke="#dce7f3" stroke-width="2"/>
+<rect x="52" y="160" width="212" height="40" rx="9" fill="#eaf3ff"/>
+<text x="72" y="186" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="13" font-weight="700" fill="#1978e6" text-anchor="start">采集任务</text>
+<text x="72" y="234" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="13" font-weight="550" fill="#586c84" text-anchor="start">监测任务</text>
+<text x="36" y="301" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="14" font-weight="550" fill="#24334c" text-anchor="start">配置</text>
+<g transform="translate(280,-62)">
+<text x="80" y="132" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="11" font-weight="800" fill="#1978e6" text-anchor="start" letter-spacing="2">WORKBENCH</text>
+<text x="80" y="183" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="31" font-weight="760" fill="#24334c" text-anchor="start">采集任务</text>
+<text x="80" y="214" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="14" font-weight="400" fill="#75859c" text-anchor="start">启动一轮岗位采集，查看任务进度与已入库岗位。</text>
+<rect x="1209" y="162" width="151" height="40" rx="9" fill="#1978e6"/>
+<text x="1284.5" y="188" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="14" font-weight="650" fill="#ffffff" text-anchor="middle">开始采集</text>
+<g transform="translate(0,-74)">
+<rect x="80" y="328" width="1280" height="114" rx="12" fill="#ffffff" stroke="#e2e9f2" stroke-width="1"/>
+<text x="104" y="358" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="15" font-weight="700" fill="#24334c" text-anchor="start">本轮任务</text>
+<rect x="1238" y="340" width="96" height="30" rx="15.0" fill="#f3f6fa"/>
+<text x="1286.0" y="360.0" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="13" font-weight="650" fill="#75859c" text-anchor="middle">尚未开始</text>
+<text x="104" y="389" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="13" font-weight="400" fill="#75859c" text-anchor="start">按当前配置抓取推荐流，完成预筛、AI 评分与入库。</text>
+<text x="104" y="418" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#75859c" text-anchor="start">采集 0</text>
+<text x="219" y="418" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#75859c" text-anchor="start">入库 0</text>
+<text x="329" y="418" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#75859c" text-anchor="start">重复 0</text>
+<text x="80" y="498" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="23" font-weight="730" fill="#24334c" text-anchor="start">已入库岗位</text>
+<text x="80" y="524" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="13" font-weight="400" fill="#75859c" text-anchor="start">岗位状态、评分与详情集中在这里查看。</text>
+<rect x="80" y="550" width="1280" height="606" rx="12" fill="#ffffff" stroke="#e2e9f2" stroke-width="1"/>
+<text x="104" y="581" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="15" font-weight="700" fill="#24334c" text-anchor="start">岗位列表</text>
+<text x="1336" y="581" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="450" fill="#75859c" text-anchor="end">1–9 / 9 · 标色门槛 71 分</text>
+<line x1="80" y1="608" x2="1360" y2="608" stroke="#e2e9f2" stroke-width="1"/>
+<rect x="104" y="621" width="917" height="36" rx="7" fill="#ffffff" stroke="#e2e9f2" stroke-width="1"/>
+<text x="118" y="644" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#75859c" text-anchor="start">关键词；可用 &amp;&amp;、||、() 组合</text>
+<rect x="1031" y="621" width="145" height="36" rx="7" fill="#ffffff" stroke="#e2e9f2" stroke-width="1"/>
+<text x="1045" y="644" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#24334c" text-anchor="start">全部状态  ▾</text>
+<rect x="1186" y="621" width="150" height="36" rx="7" fill="#f4f9ff" stroke="#b9d4f2" stroke-width="1"/>
+<text x="1261" y="644" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="700" fill="#176cc3" text-anchor="middle">批量操作</text>
+<line x1="80" y1="670" x2="1360" y2="670" stroke="#e2e9f2" stroke-width="1"/>
+<rect x="80" y="671" width="1280" height="44" rx="0" fill="#fafbfc"/>
+<text x="104" y="698" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="11" font-weight="700" fill="#8b96a6" text-anchor="start" letter-spacing="0.4">岗位 / 公司</text>
+<text x="448" y="698" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="11" font-weight="700" fill="#8b96a6" text-anchor="start" letter-spacing="0.4">薪资与要求</text>
+<text x="671" y="698" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="11" font-weight="700" fill="#8b96a6" text-anchor="start" letter-spacing="0.4">岗位评分</text>
+<text x="813" y="698" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="11" font-weight="700" fill="#8b96a6" text-anchor="start" letter-spacing="0.4">岗位状态</text>
+<text x="981" y="698" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="11" font-weight="700" fill="#8b96a6" text-anchor="start" letter-spacing="0.4">变更时间</text>
+<text x="1217" y="698" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="11" font-weight="700" fill="#8b96a6" text-anchor="start" letter-spacing="0.4">操作</text>
+<text x="104" y="749" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="14" font-weight="700" fill="#24334c" text-anchor="start">全栈&amp;前端工程师（J11588）</text>
+<text x="104" y="775" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#6d7b8e" text-anchor="start">钱信健康 · 北京</text>
+<text x="104" y="801" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="11" font-weight="400" fill="#a1aab7" text-anchor="start">boss · 4d608b453a6ce3220nN_3tW1FVVV</text>
+<text x="448" y="757" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="14" font-weight="700" fill="#65748b" text-anchor="start">25–35K</text>
+<text x="448" y="782" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#6d7b8e" text-anchor="start">5–10年 · 本科</text>
+<rect x="671" y="754" width="65" height="27" rx="5" fill="#e8f6ef"/>
+<text x="703" y="772" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="700" fill="#168253" text-anchor="middle">87 分</text>
+<rect x="813" y="754" width="65" height="27" rx="5" fill="#e8f6ef"/>
+<text x="845" y="772" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="700" fill="#168253" text-anchor="middle">已招呼</text>
+<text x="981" y="741" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="11" font-weight="400" fill="#98a4b3" text-anchor="start">入库时间</text>
+<text x="981" y="761" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#75859c" text-anchor="start">2026/09/29 00:03</text>
+<text x="981" y="787" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="11" font-weight="400" fill="#98a4b3" text-anchor="start">更新时间</text>
+<text x="981" y="807" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#75859c" text-anchor="start">2026/09/30 17:47</text>
+<text x="1217" y="774" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="650" fill="#2076d2" text-anchor="start">详情</text>
+<text x="1271" y="774" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="650" fill="#d45151" text-anchor="start">删除</text>
+<line x1="80" y1="841" x2="1360" y2="841" stroke="#f0f2f5" stroke-width="1"/>
+<text x="104" y="875" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="14" font-weight="700" fill="#24334c" text-anchor="start">高级前端开发工程师</text>
+<text x="104" y="901" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#6d7b8e" text-anchor="start">星云科技 · 北京</text>
+<text x="104" y="927" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="11" font-weight="400" fill="#a1aab7" text-anchor="start">boss · 7f83e9941c528a1d</text>
+<text x="448" y="883" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="14" font-weight="700" fill="#65748b" text-anchor="start">25–50K</text>
+<text x="448" y="908" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#6d7b8e" text-anchor="start">3–5年 · 本科</text>
+<rect x="671" y="880" width="65" height="27" rx="5" fill="#f1f3f6"/>
+<text x="703" y="898" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="700" fill="#79879a" text-anchor="middle">68 分</text>
+<rect x="813" y="880" width="65" height="27" rx="5" fill="#f1f3f6"/>
+<text x="845" y="898" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="700" fill="#79879a" text-anchor="middle">已过滤</text>
+<text x="981" y="867" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="11" font-weight="400" fill="#98a4b3" text-anchor="start">入库时间</text>
+<text x="981" y="887" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#75859c" text-anchor="start">2026/09/29 00:03</text>
+<text x="981" y="913" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="11" font-weight="400" fill="#98a4b3" text-anchor="start">更新时间</text>
+<text x="981" y="933" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#75859c" text-anchor="start">2026/09/30 14:32</text>
+<text x="1217" y="900" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="650" fill="#2076d2" text-anchor="start">详情</text>
+<text x="1271" y="900" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="650" fill="#d45151" text-anchor="start">删除</text>
+<line x1="80" y1="967" x2="1360" y2="967" stroke="#f0f2f5" stroke-width="1"/>
+<text x="104" y="1001" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="14" font-weight="700" fill="#24334c" text-anchor="start">前端技术专家</text>
+<text x="104" y="1027" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#6d7b8e" text-anchor="start">海际互联 · 上海</text>
+<text x="104" y="1053" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="11" font-weight="400" fill="#a1aab7" text-anchor="start">boss · 6d72b19d22e96be1</text>
+<text x="448" y="1009" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="14" font-weight="700" fill="#65748b" text-anchor="start">30–50K</text>
+<text x="448" y="1034" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#6d7b8e" text-anchor="start">5–10年 · 本科</text>
+<rect x="671" y="1006" width="65" height="27" rx="5" fill="#e8f6ef"/>
+<text x="703" y="1024" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="700" fill="#168253" text-anchor="middle">90 分</text>
+<rect x="813" y="1006" width="65" height="27" rx="5" fill="#e8f6ef"/>
+<text x="845" y="1024" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="700" fill="#168253" text-anchor="middle">已评分</text>
+<text x="981" y="993" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="11" font-weight="400" fill="#98a4b3" text-anchor="start">入库时间</text>
+<text x="981" y="1013" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#75859c" text-anchor="start">2026/09/29 00:05</text>
+<text x="981" y="1039" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="11" font-weight="400" fill="#98a4b3" text-anchor="start">更新时间</text>
+<text x="981" y="1059" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#75859c" text-anchor="start">2026/09/30 16:10</text>
+<text x="1217" y="1026" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="650" fill="#2076d2" text-anchor="start">详情</text>
+<text x="1271" y="1026" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="650" fill="#d45151" text-anchor="start">删除</text>
+<line x1="80" y1="1093" x2="1360" y2="1093" stroke="#e2e9f2" stroke-width="1"/>
+<text x="104" y="1129" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="400" fill="#8b97a6" text-anchor="start">显示 1–9 条</text>
+<rect x="1114" y="1108" width="66" height="31" rx="7" fill="#ffffff" stroke="#e2e9f2" stroke-width="1"/>
+<text x="1147" y="1129" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="500" fill="#75859c" text-anchor="middle">上一页</text>
+<text x="1236" y="1129" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="500" fill="#8b97a6" text-anchor="middle">第 1 页</text>
+<rect x="1279" y="1108" width="66" height="31" rx="7" fill="#ffffff" stroke="#e2e9f2" stroke-width="1"/>
+<text x="1312" y="1129" font-family="Inter, PingFang SC, Hiragino Sans GB, Microsoft YaHei, sans-serif" font-size="12" font-weight="500" fill="#75859c" text-anchor="middle">下一页</text>
+</g>
+</g>
+</svg>

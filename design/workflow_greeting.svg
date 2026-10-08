@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="440" viewBox="0 0 1180 440" role="img" aria-labelledby="diagram-title diagram-desc">
+<title id="diagram-title">02 打招呼</title>
+<desc id="diagram-desc">准备草稿，编辑后由用户发送；以 BOSS 会话中的实际结果确认成功。</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#91A3B9"/></marker></defs>
+<style>text{font-family:"PingFang SC","Microsoft YaHei",sans-serif}.canvas{fill:#FFFFFF;stroke:#DCE6F1;stroke-width:1.5}.heading{font-size:26px;font-weight:700;fill:#24344E}.subheading{font-size:14px;fill:#70829B}.node-title{font-size:17px;font-weight:700;fill:#2F425F}.node-subtitle{font-size:13px;fill:#60748F}.edge-label{font-size:12px;fill:#64748B}.legend{font-size:12px;fill:#7D8DA3}</style>
+<rect class="canvas" x="1" y="1" width="1178" height="438" rx="18"/>
+<text class="heading" x="42" y="48">02 打招呼</text>
+<text class="subheading" x="42" y="73">准备草稿，编辑后由用户发送；以 BOSS 会话中的实际结果确认成功。</text>
+<g class="edges">
+<line x1="225" y1="160" x2="265" y2="160" stroke="#91A3B9" stroke-width="2.4"/>
+<polygon points="265,160 256.0,165.0 256.0,155.0" fill="#91A3B9"/>
+<line x1="440" y1="160" x2="480" y2="160" stroke="#91A3B9" stroke-width="2.4"/>
+<polygon points="480,160 471.0,165.0 471.0,155.0" fill="#91A3B9"/>
+<line x1="655" y1="160" x2="695" y2="160" stroke="#91A3B9" stroke-width="2.4"/>
+<polygon points="695,160 686.0,165.0 686.0,155.0" fill="#91A3B9"/>
+<line x1="870" y1="160" x2="910" y2="160" stroke="#91A3B9" stroke-width="2.4"/>
+<polygon points="910,160 901.0,165.0 901.0,155.0" fill="#91A3B9"/>
+<text x="891" y="147" text-anchor="middle" class="edge-label">确认成功</text>
+<line x1="352" y1="275" x2="352" y2="205" stroke="#91A3B9" stroke-width="2.4" stroke-dasharray="7 5"/>
+<polygon points="352,205 357.0,214.0 347.0,214.0" fill="#91A3B9"/>
+<line x1="782" y1="200" x2="782" y2="275" stroke="#91A3B9" stroke-width="2.4"/>
+<polygon points="782,275 777.0,266.0 787.0,266.0" fill="#91A3B9"/>
+<text x="826" y="250" text-anchor="middle" class="edge-label">失败 / 不确定</text>
+</g>
+<g class="nodes">
+<g id="G1" data-config-node="G1">
+<title>G1 可招呼岗位；已评分 / 人工放行</title>
+<rect x="50" y="115" width="175" height="90" rx="14" fill="#F3F7FC" stroke="#8093AB" stroke-width="2"/>
+<text x="137.5" y="156.5" text-anchor="middle" class="node-title">可招呼岗位</text>
+<text x="137.5" y="179.5" text-anchor="middle" class="node-subtitle">已评分 / 人工放行</text>
+</g>
+<g id="G2" data-config-node="G2">
+<title>G2 准备招呼语；AI 生成 / 手写</title>
+<rect x="265" y="115" width="175" height="90" rx="14" fill="#EAF3FF" stroke="#4686D9" stroke-width="2"/>
+<text x="352.5" y="156.5" text-anchor="middle" class="node-title">准备招呼语</text>
+<text x="352.5" y="179.5" text-anchor="middle" class="node-subtitle">AI 生成 / 手写</text>
+</g>
+<g id="G3" data-config-node="G3">
+<title>G3 编辑并保存；最多 300 字</title>
+<rect x="480" y="115" width="175" height="90" rx="14" fill="#EAF3FF" stroke="#4686D9" stroke-width="2"/>
+<text x="567.5" y="156.5" text-anchor="middle" class="node-title">编辑并保存</text>
+<text x="567.5" y="179.5" text-anchor="middle" class="node-subtitle">最多 300 字</text>
+</g>
+<g id="G4" data-config-node="G4">
+<title>G4 发送到 BOSS；用户确认并发送</title>
+<rect x="695" y="115" width="175" height="90" rx="14" fill="#EAF3FF" stroke="#4686D9" stroke-width="2"/>
+<text x="782.5" y="156.5" text-anchor="middle" class="node-title">发送到 BOSS</text>
+<text x="782.5" y="179.5" text-anchor="middle" class="node-subtitle">用户确认并发送</text>
+</g>
+<g id="G5" data-config-node="G5">
+<title>G5 已招呼；查看对应会话</title>
+<rect x="910" y="115" width="175" height="90" rx="14" fill="#EAF8F0" stroke="#51A878" stroke-width="2"/>
+<text x="997.5" y="156.5" text-anchor="middle" class="node-title">已招呼</text>
+<text x="997.5" y="179.5" text-anchor="middle" class="node-subtitle">查看对应会话</text>
+</g>
+<g id="G2-template" data-config-node="G2-template">
+<title>G2-template 招呼模板；计划中的来源</title>
+<rect x="265" y="275" width="175" height="90" rx="14" fill="#EAF3FF" stroke="#4686D9" stroke-width="2" stroke-dasharray="7 5"/>
+<text x="352.5" y="316.5" text-anchor="middle" class="node-title">招呼模板</text>
+<text x="352.5" y="339.5" text-anchor="middle" class="node-subtitle">计划中的来源</text>
+</g>
+<g id="G4-check" data-config-node="G4-check">
+<title>G4-check 人工核查；不自动重发</title>
+<rect x="695" y="275" width="175" height="90" rx="14" fill="#F2EEFF" stroke="#8D75CB" stroke-width="2"/>
+<text x="782.5" y="316.5" text-anchor="middle" class="node-title">人工核查</text>
+<text x="782.5" y="339.5" text-anchor="middle" class="node-subtitle">不自动重发</text>
+</g>
+</g>
+<text class="legend" x="42" y="416">蓝色：动作　橙色：判断　绿色：结果　紫色：人工选择　虚线：待实现</text>
+</svg>

@@ -1,0 +1,16 @@
+.venv/
+.state/
+data/resumes/
+data/*.db
+data/*.sqlite3
+.env
+.env.*
+!.env.example
+*.credentials.yaml
+*.sqlite
+*.log
+.DS_Store
+__pycache__/
+*.py[cod]
+web/node_modules/
+web/dist/

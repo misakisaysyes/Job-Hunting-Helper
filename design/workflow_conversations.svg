@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1300" height="600" viewBox="0 0 1300 600" role="img" aria-labelledby="diagram-title diagram-desc">
+<title id="diagram-title">03 跟会话</title>
+<desc id="diagram-desc">扫描最近会话；池内看进展，池外先预筛岗位。</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#91A3B9"/></marker></defs>
+<style>text{font-family:"PingFang SC","Microsoft YaHei",sans-serif}.canvas{fill:#FFFFFF;stroke:#DCE6F1;stroke-width:1.5}.heading{font-size:26px;font-weight:700;fill:#24344E}.subheading{font-size:14px;fill:#70829B}.node-title{font-size:17px;font-weight:700;fill:#2F425F}.node-subtitle{font-size:13px;fill:#60748F}.edge-label{font-size:12px;fill:#64748B}.legend{font-size:12px;fill:#7D8DA3}</style>
+<rect class="canvas" x="1" y="1" width="1298" height="598" rx="18"/>
+<text class="heading" x="42" y="48">03 跟会话</text>
+<text class="subheading" x="42" y="73">扫描最近会话；池内看进展，池外先预筛岗位。</text>
+<g class="edges">
+<line x1="235" y1="158" x2="275" y2="158" stroke="#91A3B9" stroke-width="2.4"/>
+<polygon points="275,158 266.0,163.0 266.0,153.0" fill="#91A3B9"/>
+<line x1="460" y1="158" x2="500" y2="158" stroke="#91A3B9" stroke-width="2.4"/>
+<polygon points="500,158 491.0,163.0 491.0,153.0" fill="#91A3B9"/>
+<line x1="685" y1="158" x2="725" y2="158" stroke="#91A3B9" stroke-width="2.4"/>
+<polygon points="725,158 716.0,163.0 716.0,153.0" fill="#91A3B9"/>
+<line x1="817" y1="200" x2="817" y2="235" stroke="#91A3B9" stroke-width="2.4"/>
+<line x1="817" y1="235" x2="440" y2="235" stroke="#91A3B9" stroke-width="2.4"/>
+<line x1="440" y1="235" x2="440" y2="270" stroke="#91A3B9" stroke-width="2.4"/>
+<polygon points="440,270 435.0,261.0 445.0,261.0" fill="#91A3B9"/>
+<text x="620" y="224" text-anchor="middle" class="edge-label">池内</text>
+<line x1="817" y1="235" x2="1080" y2="235" stroke="#91A3B9" stroke-width="2.4"/>
+<line x1="1080" y1="235" x2="1080" y2="270" stroke="#91A3B9" stroke-width="2.4"/>
+<polygon points="1080,270 1075.0,261.0 1085.0,261.0" fill="#91A3B9"/>
+<text x="1015" y="224" text-anchor="middle" class="edge-label">池外</text>
+<line x1="440" y1="360" x2="440" y2="430" stroke="#91A3B9" stroke-width="2.4" stroke-dasharray="7 5"/>
+<polygon points="440,430 435.0,421.0 445.0,421.0" fill="#91A3B9"/>
+<text x="474" y="401" text-anchor="middle" class="edge-label">待回复</text>
+<line x1="545" y1="315" x2="660" y2="315" stroke="#91A3B9" stroke-width="2.4"/>
+<line x1="660" y1="315" x2="660" y2="430" stroke="#91A3B9" stroke-width="2.4"/>
+<polygon points="660,430 655.0,421.0 665.0,421.0" fill="#91A3B9"/>
+<text x="615" y="300" text-anchor="middle" class="edge-label">其他回复</text>
+<line x1="1080" y1="360" x2="1080" y2="395" stroke="#91A3B9" stroke-width="2.4" stroke-dasharray="7 5"/>
+<line x1="1080" y1="395" x2="945" y2="395" stroke="#91A3B9" stroke-width="2.4" stroke-dasharray="7 5"/>
+<line x1="945" y1="395" x2="945" y2="430" stroke="#91A3B9" stroke-width="2.4" stroke-dasharray="7 5"/>
+<polygon points="945,430 940.0,421.0 950.0,421.0" fill="#91A3B9"/>
+<text x="972" y="382" text-anchor="middle" class="edge-label">通过</text>
+<line x1="1080" y1="395" x2="1165" y2="395" stroke="#91A3B9" stroke-width="2.4" stroke-dasharray="7 5"/>
+<line x1="1165" y1="395" x2="1165" y2="430" stroke="#91A3B9" stroke-width="2.4" stroke-dasharray="7 5"/>
+<polygon points="1165,430 1160.0,421.0 1170.0,421.0" fill="#91A3B9"/>
+<text x="1178" y="382" text-anchor="middle" class="edge-label">未通过</text>
+</g>
+<g class="nodes">
+<g id="M1" data-config-node="M1">
+<title>M1 启动监测；手动 / 定时待实现</title>
+<rect x="50" y="115" width="185" height="85" rx="14" fill="#EAF3FF" stroke="#4686D9" stroke-width="2"/>
+<text x="142.5" y="154.0" text-anchor="middle" class="node-title">启动监测</text>
+<text x="142.5" y="177.0" text-anchor="middle" class="node-subtitle">手动 / 定时待实现</text>
+</g>
+<g id="M2" data-config-node="M2">
+<title>M2 扫描最近活动会话</title>
+<rect x="275" y="115" width="185" height="85" rx="14" fill="#EAF3FF" stroke="#4686D9" stroke-width="2"/>
+<text x="367.5" y="154.0" text-anchor="middle" class="node-title">扫描最近会话</text>
+<text x="367.5" y="177.0" text-anchor="middle" class="node-subtitle">按最近活动天数</text>
+</g>
+<g id="M3" data-config-node="M3">
+<title>M3 读取最近消息；每条 Y=10 条</title>
+<rect x="500" y="115" width="185" height="85" rx="14" fill="#EAF3FF" stroke="#4686D9" stroke-width="2"/>
+<text x="592.5" y="154.0" text-anchor="middle" class="node-title">读取最近消息</text>
+<text x="592.5" y="177.0" text-anchor="middle" class="node-subtitle">每条 Y=10 条</text>
+</g>
+<g id="M4" data-config-node="M4">
+<title>M4 在岗位池中？；按岗位 ID 判断</title>
+<rect x="725" y="115" width="185" height="85" rx="14" fill="#FFF4E8" stroke="#D89541" stroke-width="2"/>
+<text x="817.5" y="154.0" text-anchor="middle" class="node-title">在岗位池中？</text>
+<text x="817.5" y="177.0" text-anchor="middle" class="node-subtitle">按岗位 ID 判断</text>
+</g>
+<g id="M5" data-config-node="M5">
+<title>M5 判断会话进展；拒绝 / 投递 → 结束</title>
+<rect x="335" y="270" width="210" height="90" rx="14" fill="#FFF4E8" stroke="#D89541" stroke-width="2"/>
+<text x="440.0" y="311.5" text-anchor="middle" class="node-title">判断会话进展</text>
+<text x="440.0" y="334.5" text-anchor="middle" class="node-subtitle">拒绝 / 投递 → 结束</text>
+</g>
+<g id="M6" data-config-node="M6">
+<title>M6 追问规则；等待时长 · 最多次数</title>
+<rect x="335" y="430" width="210" height="90" rx="14" fill="#EAF3FF" stroke="#4686D9" stroke-width="2" stroke-dasharray="7 5"/>
+<text x="440.0" y="471.5" text-anchor="middle" class="node-title">追问规则</text>
+<text x="440.0" y="494.5" text-anchor="middle" class="node-subtitle">等待时长 · 最多次数</text>
+</g>
+<g id="M7" data-config-node="M7">
+<title>M7 人工处理；HR 其他回复</title>
+<rect x="570" y="430" width="180" height="90" rx="14" fill="#F2EEFF" stroke="#8D75CB" stroke-width="2"/>
+<text x="660.0" y="471.5" text-anchor="middle" class="node-title">人工处理</text>
+<text x="660.0" y="494.5" text-anchor="middle" class="node-subtitle">HR 其他回复</text>
+</g>
+<g id="M8" data-config-node="M8">
+<title>M8 池外岗位预筛；复用找岗位的规则</title>
+<rect x="960" y="270" width="240" height="90" rx="14" fill="#FFF4E8" stroke="#D89541" stroke-width="2" stroke-dasharray="7 5"/>
+<text x="1080.0" y="311.5" text-anchor="middle" class="node-title">池外岗位预筛</text>
+<text x="1080.0" y="334.5" text-anchor="middle" class="node-subtitle">复用找岗位的规则</text>
+</g>
+<g id="M8-pass" data-config-node="M8-pass">
+<title>M8-pass 预筛通过；附件简历审核后发送</title>
+<rect x="855" y="430" width="180" height="90" rx="14" fill="#EAF8F0" stroke="#51A878" stroke-width="2" stroke-dasharray="7 5"/>
+<text x="945.0" y="471.5" text-anchor="middle" class="node-title">预筛通过</text>
+<text x="945.0" y="494.5" text-anchor="middle" class="node-subtitle">附件简历审核后发送</text>
+</g>
+<g id="M8-no" data-config-node="M8-no">
+<title>M8-no 未通过；礼貌回复审核后发送</title>
+<rect x="1075" y="430" width="180" height="90" rx="14" fill="#F3F5F8" stroke="#A5B0BD" stroke-width="2" stroke-dasharray="7 5"/>
+<text x="1165.0" y="471.5" text-anchor="middle" class="node-title">未通过</text>
+<text x="1165.0" y="494.5" text-anchor="middle" class="node-subtitle">礼貌回复审核后发送</text>
+</g>
+</g>
+<text class="legend" x="42" y="576">蓝色：动作　橙色：判断　绿色：结果　紫色：人工选择　虚线：待实现</text>
+</svg>
