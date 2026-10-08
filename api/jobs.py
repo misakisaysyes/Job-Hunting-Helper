@@ -99,7 +99,7 @@ def open_conversation(db_path: Path, config: dict, platform: str, job_id: str) -
 def generate_greeting(db_path: Path, config: dict, scheduler: AITaskScheduler,
                       platform: str, job_id: str) -> dict:
     job = get_job(db_path, config, platform, job_id)
-    if job["job_status"] != "greeting_ready":
+    if job["job_status"] != "greeting_ready" or job["greeting_send_state"] != "idle":
         raise JobActionError("当前岗位状态不能生成招呼语", 409)
     if job["ai_score_status"] == "not_scored":
         raise JobActionError("此岗位未启用 AI 评分，请手动编辑招呼语", 409)
@@ -160,12 +160,17 @@ def send_greeting(db_path: Path, config: dict, platform: str,
                 platform, job_id, outcome="unknown", note=note)
         raise JobActionError(f"{note}；发送结果未知，请人工核查，系统不会自动重发", 409)
     outcome = "sent" if result.verified else "unknown" if result.uncertain else "failed"
+    note = (f"{result.message}；原草稿：{text}"
+            if result.actual_greeting and result.actual_greeting != text else result.message)
     with closing(sqlite3.connect(db_path, timeout=10)) as conn:
         store = _store(conn, config)
         if not store.finish_greeting_send(platform, job_id, outcome=outcome,
-                                          chat_url=result.chat_url, note=result.message):
+                                          chat_url=result.chat_url, note=note,
+                                          actual_greeting=result.actual_greeting):
             raise JobActionError("发送结果已返回，但岗位状态保存失败，请人工核查", 500)
         updated = store.get_job(platform, job_id)
+    if result.verified and result.actual_greeting:
+        raise JobActionError(result.message, 409)
     if not result.verified:
         raise JobActionError(result.message, 409 if result.uncertain else 502)
     return {"job": updated, "message": result.message}
@@ -182,8 +187,13 @@ def confirm_greeting_not_sent(db_path: Path, config: dict, platform: str,
     with closing(sqlite3.connect(db_path, timeout=10)) as conn:
         store = _store(conn, config)
         if inspection.verified:
+            note = (f"{inspection.message}；原草稿：{job['greeting']}"
+                    if inspection.actual_greeting
+                    and inspection.actual_greeting != job["greeting"] else inspection.message)
             if not store.mark_greeting_sent_after_verification(
-                    platform, job_id, inspection.chat_url):
+                    platform, job_id, inspection.chat_url,
+                    actual_greeting=inspection.actual_greeting,
+                    note=note):
                 raise JobActionError("岗位状态已变化，请刷新后检查", 409)
             return store.get_job(platform, job_id)
         if inspection.uncertain:

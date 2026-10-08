@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useAlertSound } from "../../hooks/useAlertSound";
 import { executeMonitoringBatch } from "./monitoringBatch";
 
 export const monitoringKey = (item) => `${item.platform}:${item.conversation_id}`;
@@ -10,6 +11,7 @@ export default function useMonitoringBatch({ items, page, filters, actions, onRe
   const [progress, setProgress] = useState("");
   const [notice, setNotice] = useState("");
   const [preview, setPreview] = useState(null);
+  const { playConfirmationAlert } = useAlertSound();
   const selectedItems = items.filter((item) => selectedKeys.has(monitoringKey(item)));
   const allSelected = items.length > 0 && selectedItems.length === items.length;
 
@@ -69,8 +71,9 @@ export default function useMonitoringBatch({ items, page, filters, actions, onRe
         (done, total) => setProgress(`正在${action.label}：${done}/${total}`));
       const skippedTotal = skipped + eligible.length - processed;
       setNotice(`${action.label}完成：成功 ${success}，跳过 ${skippedTotal}，失败 ${failures.length}。${failures.slice(0, 2).join("；")}`);
+      playConfirmationAlert();
       setSelectedKeys(new Set());
-      onReload();
+      await onReload();
     } finally {
       setBusy("");
       setProgress("");

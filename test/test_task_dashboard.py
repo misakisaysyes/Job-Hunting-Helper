@@ -1,8 +1,10 @@
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import sqlite3
 from tempfile import TemporaryDirectory
 from threading import Barrier
 from types import SimpleNamespace
@@ -14,6 +16,7 @@ from api.server import requires_service_restart
 from api.settings import (SettingsError, apply_full_settings, read_full_settings, save_full_settings,
                           save_resume_upload)
 from config import DEFAULT_CONFIG, MONITORING_CONFIG
+from data.job_store import JobStore
 from data.task_run_store import TaskAlreadyRunning, TaskRunStore
 
 
@@ -143,7 +146,8 @@ class TaskRunStoreTests(unittest.TestCase):
 
             summary = store.today(now=datetime(2026, 10, 5, 2, tzinfo=timezone.utc))
             self.assertEqual(summary["collection"]["runs"], 1)
-            self.assertEqual(summary["collection"]["totals"], {"new": 2, "duplicate": 1})
+            self.assertEqual(summary["collection"]["totals"],
+                             {"new": 2, "duplicate": 1, "greeted": 0})
             self.assertEqual(summary["monitoring"]["runs"], 1)
             self.assertEqual(summary["monitoring"]["history"][0]["status"], "running")
 
@@ -165,6 +169,74 @@ class TaskRunStoreTests(unittest.TestCase):
                                                       tzinfo=timezone.utc))["collection"]["history"][0]
             self.assertEqual(row["status"], "completed")
             self.assertEqual(row["counts"], {"seen": 4, "new": 2})
+
+    def test_running_collection_counts_are_visible_in_both_status_and_today(self):
+        with TemporaryDirectory() as temp:
+            db_path = Path(temp) / "tasks.sqlite3"
+            runner = CollectionRun(db_path)
+            run_id = runner.run_store.start(
+                "collection", "2026-10-05T01:00:00+00:00", "采集中")
+            runner.status = "running"
+            runner.run_id = run_id
+            runner._progress({"seen": 5, "duplicate_jobs": 2, "new": 1,
+                              "filtered": 2, "qualified": 0, "ai_scored": 1,
+                              "ai_score_failed": 0})
+
+            self.assertEqual(runner.snapshot()["counts"]["seen"], 5)
+            summary = runner.run_store.today(now=datetime(2026, 10, 5, 2,
+                                                          tzinfo=timezone.utc))
+            run = summary["collection"]["history"][0]
+            self.assertEqual(run["status"], "running")
+            self.assertEqual(run["counts"]["duplicate_jobs"], 2)
+            self.assertEqual(summary["collection"]["totals"]["ai_scored"], 1)
+
+    def test_daily_greeted_counts_verified_sends_not_generated_drafts(self):
+        with TemporaryDirectory() as temp:
+            db_path = Path(temp) / "tasks.sqlite3"
+            runs = TaskRunStore(db_path)
+            run_id = runs.start("collection", "2026-10-05T00:00:00+00:00", "采集中")
+            runs.finish(run_id, "completed", "完成",
+                        {"new": 2, "ai_greeting_generated": 2},
+                        "2026-10-05T00:02:00+00:00")
+            with closing(sqlite3.connect(db_path)) as conn:
+                jobs = JobStore(conn, score_threshold=71)
+                for job_id in ("today", "yesterday", "draft"):
+                    jobs.save({"source_platform": "boss", "source_job_id": job_id,
+                               "ai_score_status": "scored", "ai_score": 80})
+                for job_id in ("today", "yesterday"):
+                    self.assertTrue(jobs.reserve_greeting_send("boss", job_id, "您好"))
+                    self.assertTrue(jobs.finish_greeting_send("boss", job_id, outcome="sent"))
+                conn.execute("""UPDATE greeting_send_events SET sent_at = CASE source_job_id
+                    WHEN 'today' THEN '2026-10-05T02:00:00+00:00'
+                    ELSE '2026-10-04T15:59:00+00:00' END""")
+                conn.commit()
+
+                summary = runs.today(now=datetime(2026, 10, 5, 3, tzinfo=timezone.utc))
+                self.assertEqual(summary["collection"]["totals"], {"new": 2, "greeted": 1})
+                self.assertEqual(summary["collection"]["history"][0]["counts"], {"new": 2})
+                self.assertTrue(jobs.delete("boss", "today"))
+            self.assertEqual(runs.today(now=datetime(2026, 10, 5, 3,
+                                                    tzinfo=timezone.utc))["collection"]
+                             ["totals"]["greeted"], 1)
+
+    def test_existing_confirmed_sends_are_backfilled_for_today(self):
+        with TemporaryDirectory() as temp:
+            db_path = Path(temp) / "tasks.sqlite3"
+            runs = TaskRunStore(db_path)
+            with closing(sqlite3.connect(db_path)) as conn:
+                jobs = JobStore(conn, score_threshold=71)
+                jobs.save({"source_platform": "boss", "source_job_id": "old-send",
+                           "ai_score_status": "scored", "ai_score": 80})
+                jobs.reserve_greeting_send("boss", "old-send", "您好")
+                jobs.finish_greeting_send("boss", "old-send", outcome="sent")
+                conn.execute("""UPDATE job_status_events SET changed_at = ?
+                    WHERE source_job_id = 'old-send' AND status = 'greeted'""",
+                    ("2026-10-05T02:00:00+00:00",))
+                conn.execute("DROP TABLE greeting_send_events")
+                conn.commit()
+                JobStore(conn, score_threshold=71)
+            summary = runs.today(now=datetime(2026, 10, 5, 3, tzinfo=timezone.utc))
+            self.assertEqual(summary["collection"]["totals"]["greeted"], 1)
 
 
 if __name__ == "__main__":

@@ -37,6 +37,14 @@ class AIScoreCollectionTests(unittest.TestCase):
         self.config["collection"].update(
             mode="recommend", encrypt_expect_id=["expect-id"], max_jobs=0,
         )
+        self.config["ai"]["use_ai_greeting"] = False
+        self.config["profile"].update(
+            education=[], experience_filters=[], company_sizes=[],
+            recruitment_types=["experienced", "campus", "internship"],
+            salary_min=0, salary_max=0, filter_unparsed_salary=False,
+            deal_breakers=[], jd_deal_breakers=[], blocked_companies=[],
+            exclude_headhunter=False,
+        )
 
     def run_with_runner(self, runner, on_record):
         with patch("run.open_safety_db"):

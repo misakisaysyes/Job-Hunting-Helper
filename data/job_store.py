@@ -119,6 +119,26 @@ class JobStore:
             except Exception:
                 self.conn.rollback()
                 raise
+        had_send_events = self.conn.execute("""SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'greeting_send_events'""").fetchone() is not None
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS greeting_send_events (
+            platform TEXT NOT NULL,
+            source_job_id TEXT NOT NULL,
+            sent_at TEXT NOT NULL,
+            PRIMARY KEY (platform, source_job_id, sent_at)
+        )""")
+        self.conn.execute("""CREATE INDEX IF NOT EXISTS idx_greeting_send_events_sent_at
+            ON greeting_send_events(sent_at)""")
+        if not had_send_events:
+            self.conn.execute("""INSERT OR IGNORE INTO greeting_send_events
+                (platform, source_job_id, sent_at)
+                SELECT events.platform, events.source_job_id, MIN(events.changed_at)
+                FROM job_status_events AS events
+                JOIN collected_jobs AS jobs ON jobs.platform = events.platform
+                    AND jobs.source_job_id = events.source_job_id
+                WHERE events.status = 'greeted' AND jobs.greeting_send_state = 'sent'
+                GROUP BY events.platform, events.source_job_id""")
+        self.conn.commit()
         ready_jobs = self.conn.execute("""SELECT platform, source_job_id FROM collected_jobs
             WHERE job_status = 'scored' AND (
                 ai_score_status = 'not_scored'
@@ -151,6 +171,11 @@ class JobStore:
                 (platform, source_job_id, status, changed_at) VALUES (?, ?, ?, ?)""",
                 (platform, source_job_id, status, now),
             )
+
+    def _record_greeting_send(self, platform: str, source_job_id: str, now: str) -> None:
+        self.conn.execute("""INSERT OR IGNORE INTO greeting_send_events
+            (platform, source_job_id, sent_at) VALUES (?, ?, ?)""",
+            (platform, source_job_id, now))
 
     def contains(self, platform: str, source_job_id: str) -> bool:
         row = self.conn.execute(
@@ -419,7 +444,8 @@ class JobStore:
         return cursor.rowcount
 
     def finish_greeting_send(self, platform: str, source_job_id: str, *, outcome: str,
-                             chat_url: str = "", note: str = "") -> bool:
+                             chat_url: str = "", note: str = "",
+                             actual_greeting: str = "") -> bool:
         if outcome not in {"sent", "failed", "unknown"}:
             raise ValueError("未知发送结果")
         now = datetime.now(timezone.utc).isoformat()
@@ -428,14 +454,17 @@ class JobStore:
             """UPDATE collected_jobs
                SET greeting_send_state = ?,
                    greeting_send_note = ?,
+                   greeting = CASE WHEN ? = 'sent' AND ? != '' THEN ? ELSE greeting END,
                    job_status = CASE WHEN ? = 'sent' THEN 'greeted' ELSE job_status END,
                    chat_url = CASE WHEN ? = 'sent' THEN ? ELSE chat_url END,
                    updated_at = ?
                WHERE platform = ? AND source_job_id = ? AND greeting_send_state = 'sending'""",
-            (next_state, note, outcome, outcome, chat_url, now, platform, source_job_id),
+            (next_state, note, outcome, actual_greeting, actual_greeting,
+             outcome, outcome, chat_url, now, platform, source_job_id),
         )
         if cursor.rowcount == 1 and outcome == "sent":
             self._record_status(platform, source_job_id, "greeted", now)
+            self._record_greeting_send(platform, source_job_id, now)
         self.conn.commit()
         return cursor.rowcount == 1
 
@@ -453,20 +482,24 @@ class JobStore:
         return cursor.rowcount == 1
 
     def mark_greeting_sent_after_verification(self, platform: str, source_job_id: str,
-                                               chat_url: str) -> bool:
+                                               chat_url: str, *, actual_greeting: str = "",
+                                               note: str = "已在 BOSS 会话中确认招呼语") -> bool:
         """Recover an uncertain send after the matching BOSS chat shows the greeting."""
         now = datetime.now(timezone.utc).isoformat()
         cursor = self.conn.execute(
             """UPDATE collected_jobs SET greeting_send_state = 'sent',
-                   greeting_send_note = '已在 BOSS 会话中确认招呼语',
+                   greeting_send_note = ?,
+                   greeting = CASE WHEN ? != '' THEN ? ELSE greeting END,
                    job_status = 'greeted', chat_url = ?, updated_at = ?
                WHERE platform = ? AND source_job_id = ?
                  AND greeting_send_state = 'unknown'
                  AND job_status IN ('scored', 'greeting_ready')""",
-            (chat_url, now, platform, source_job_id),
+            (note, actual_greeting, actual_greeting, chat_url, now,
+             platform, source_job_id),
         )
         if cursor.rowcount == 1:
             self._record_status(platform, source_job_id, "greeted", now)
+            self._record_greeting_send(platform, source_job_id, now)
         self.conn.commit()
         return cursor.rowcount == 1
 

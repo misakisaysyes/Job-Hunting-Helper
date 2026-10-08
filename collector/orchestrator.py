@@ -14,11 +14,13 @@ class CollectionOrchestrator:
     def __init__(self, *, browser: object, config: dict, safety_conn: object | None = None,
                  already_collected: Callable[[str, str], bool] | None = None,
                  target_reached: Callable[[], bool] | None = None,
-                 on_cycle_complete: Callable[[], None] | None = None) -> None:
+                 on_cycle_complete: Callable[[], None] | None = None,
+                 on_counts: Callable[[dict[str, int]], None] | None = None) -> None:
         self.collector = BossCollector(browser=browser, config=config, safety_conn=safety_conn)
         self.already_collected = already_collected or (lambda platform, job_id: False)
         self.target_reached = target_reached or (lambda: False)
         self.on_cycle_complete = on_cycle_complete or (lambda: None)
+        self.on_counts = on_counts or (lambda counts: None)
         self.target_count = config.get("collection", {}).get("target_jobs", 0) if target_reached else 0
 
     def run(self, request: PlatformCollectionRequest, *,
@@ -34,9 +36,14 @@ class CollectionOrchestrator:
         if max_jobs < 0:
             raise ValueError("max_jobs 不能为负数")
 
-        seen_ids: set[str] = set()
+        seen_ids: set[tuple[str, str]] = set()
         jobs: list[JobCandidate] = []
-        counts = {"seen": 0, "new": 0, "duplicate": 0, "filtered": 0, "parse_failed": 0}
+        counts = {"seen": 0, "new": 0, "duplicate_jobs": 0, "filtered": 0, "parse_failed": 0}
+
+        def publish_counts() -> None:
+            self.on_counts(counts.copy())
+
+        publish_counts()
 
         def emit(message: str) -> None:
             if message and on_event is not None:
@@ -44,26 +51,34 @@ class CollectionOrchestrator:
 
         def inspect(candidate: JobCandidate) -> bool:
             counts["seen"] += 1
-            key = candidate.source_job_id
-            if key in seen_ids or self.already_collected(candidate.platform, key):
-                counts["duplicate"] += 1
+            key = (candidate.platform, candidate.source_job_id)
+            if key in seen_ids:
+                publish_counts()
                 return False
             seen_ids.add(key)
+            if self.already_collected(*key):
+                counts["duplicate_jobs"] += 1
+                publish_counts()
+                return False
+            publish_counts()
             return True
 
         def save(candidate: JobCandidate) -> bool:
             jobs.append(candidate)
             counts["new"] += 1
             on_job(candidate)
+            publish_counts()
             return max_jobs == 0 or len(jobs) < max_jobs
 
         def parse_failed(reason: str) -> None:
             counts["parse_failed"] += 1
+            publish_counts()
             emit(f"解析失败：{reason}")
 
         def event(**values: object) -> None:
             if values.get("increment_filtered"):
                 counts["filtered"] += 1
+                publish_counts()
             message = values.get("message")
             if message:
                 emit(str(message))

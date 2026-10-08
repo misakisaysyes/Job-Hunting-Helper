@@ -19,12 +19,79 @@ sys.path.insert(0, str(ROOT))
 
 from api.jobs import JobActionError, confirm_greeting_not_sent, generate_greeting, open_conversation, send_greeting, start_greeting
 from browser.browser import ChromeBrowser
-from browser.boss_message import SendResult, send_boss_greeting
+from browser.boss_message import SendResult, _same_recruiter_history, send_boss_greeting
 from config import DEFAULT_CONFIG
 from data.job_store import JobStore
 
 
 class GreetingSendFlowTests(unittest.TestCase):
+    def test_recruiter_history_fallback_finds_sent_message_after_job_redirect(self) -> None:
+        page = MagicMock()
+        page.evaluate.return_value = "avatar-url"
+        friend = {"uid": "recruiter", "encryptBossId": "boss-id",
+                  "avatar": "avatar-url?size=50", "securityId": "security-id"}
+        message = {"from": {"uid": "candidate"}, "body": {"text": "您好"},
+                   "status": 1, "mid": 1}
+        with patch("browser.boss_message._fetch_history", return_value=[message]):
+            result = _same_recruiter_history(
+                page, "boss-id", [friend], "您好", "https://www.zhipin.com/web/geek/chat?jobId=job-id")
+        self.assertTrue(result.verified)
+        self.assertFalse(result.uncertain)
+
+    def test_recruiter_history_fallback_requires_matching_selected_recruiter(self) -> None:
+        page = MagicMock()
+        page.evaluate.return_value = "another-avatar"
+        friend = {"uid": "recruiter", "encryptBossId": "boss-id",
+                  "avatar": "avatar-url", "securityId": "security-id"}
+        with patch("browser.boss_message._fetch_history") as history:
+            result = _same_recruiter_history(
+                page, "boss-id", [friend], "您好", "https://www.zhipin.com/web/geek/chat")
+        self.assertIsNone(result)
+        history.assert_not_called()
+
+    def test_recruiter_history_fallback_allows_user_confirmed_unlock_when_absent(self) -> None:
+        page = MagicMock()
+        page.evaluate.return_value = "avatar-url"
+        friend = {"uid": "recruiter", "encryptBossId": "boss-id",
+                  "avatar": "avatar-url", "securityId": "security-id"}
+        with patch("browser.boss_message._fetch_history", return_value=[]):
+            result = _same_recruiter_history(
+                page, "boss-id", [friend], "您好", "https://www.zhipin.com/web/geek/chat")
+        self.assertFalse(result.verified)
+        self.assertFalse(result.uncertain)
+        self.assertIn("未找到", result.message)
+
+    def test_recent_preset_greeting_is_verified_as_actual_sent_text(self) -> None:
+        page = MagicMock()
+        page.evaluate.return_value = "avatar-url"
+        friend = {"uid": "recruiter", "encryptBossId": "boss-id",
+                  "encryptJobId": "job-id", "avatar": "avatar-url"}
+        preset = "Boss您好，看到贵公司的招聘信息，希望能得到贵公司的垂青，谢谢"
+        message = {"from": {"uid": "candidate"}, "body": {"text": preset},
+                   "status": 1, "mid": 1, "time": 1791454452678}
+        with patch("browser.boss_message._fetch_history", return_value=[message]):
+            result = _same_recruiter_history(
+                page, "boss-id", [friend], "自定义招呼语",
+                "https://www.zhipin.com/web/geek/chat?jobId=job-id",
+                source_job_id="job-id", preset_attempt_at="2026-10-08T10:14:13+00:00")
+        self.assertTrue(result.verified)
+        self.assertEqual(result.actual_greeting, preset)
+
+    def test_old_message_for_other_job_is_not_preset_evidence(self) -> None:
+        page = MagicMock()
+        page.evaluate.return_value = "avatar-url"
+        friend = {"uid": "recruiter", "encryptBossId": "boss-id",
+                  "encryptJobId": "other-job", "avatar": "avatar-url"}
+        message = {"from": {"uid": "candidate"}, "body": {"text": "旧招呼"},
+                   "status": 1, "mid": 1, "time": 1791454452678}
+        with patch("browser.boss_message._fetch_history", return_value=[message]):
+            result = _same_recruiter_history(
+                page, "boss-id", [friend], "自定义招呼语",
+                "https://www.zhipin.com/web/geek/chat?jobId=job-id",
+                source_job_id="job-id", preset_attempt_at="2026-10-08T10:14:13+00:00")
+        self.assertFalse(result.verified)
+        self.assertFalse(result.uncertain)
+
     def test_low_score_requires_explicit_start_before_empty_greeting_stage(self) -> None:
         config = deepcopy(DEFAULT_CONFIG)
         with TemporaryDirectory() as directory:
@@ -62,6 +129,31 @@ class GreetingSendFlowTests(unittest.TestCase):
             with closing(sqlite3.connect(db_path)) as conn:
                 self.assertEqual(JobStore(conn).get_job("boss", "job-id")[
                     "job_status_history"], ["scored", "greeting_ready"])
+
+    def test_greeted_job_cannot_generate_or_send_again(self) -> None:
+        config = deepcopy(DEFAULT_CONFIG)
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "jobs.sqlite"
+            with closing(sqlite3.connect(db_path)) as conn:
+                store = JobStore(conn, score_threshold=71)
+                store.save({
+                    "source_platform": "boss", "source_job_id": "sent",
+                    "ai_score_status": "scored", "ai_score": 88,
+                })
+                self.assertTrue(store.reserve_greeting_send("boss", "sent", "已发送的招呼语"))
+                self.assertTrue(store.finish_greeting_send("boss", "sent", outcome="sent"))
+            scheduler = MagicMock()
+            with self.assertRaisesRegex(JobActionError, "不能生成招呼语"):
+                generate_greeting(db_path, config, scheduler, "boss", "sent")
+            scheduler.submit.assert_not_called()
+            with patch("api.jobs.send_boss_greeting") as sender:
+                with self.assertRaisesRegex(JobActionError, "岗位状态已变化"):
+                    send_greeting(db_path, config, "boss", "sent", "再次发送")
+                sender.assert_not_called()
+            with closing(sqlite3.connect(db_path)) as conn:
+                job = JobStore(conn).get_job("boss", "sent")
+            self.assertEqual(job["job_status"], "greeted")
+            self.assertEqual(job["greeting"], "已发送的招呼语")
 
     def test_view_conversation_uses_connected_chrome(self) -> None:
         config = deepcopy(DEFAULT_CONFIG)
@@ -172,6 +264,28 @@ class GreetingSendFlowTests(unittest.TestCase):
             self.assertEqual(recovered["greeting"], "您好")
             self.assertEqual(recovered["job_status"], "greeting_ready")
 
+    def test_preset_greeting_stops_batch_but_records_actual_sent_text(self) -> None:
+        config = deepcopy(DEFAULT_CONFIG)
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "jobs.sqlite"
+            with closing(sqlite3.connect(db_path)) as conn:
+                JobStore(conn, score_threshold=71).save({
+                    "source_platform": "boss", "source_job_id": "job-id",
+                    "ai_score_status": "scored", "ai_score": 88,
+                })
+            actual = "Boss您好，看到贵公司的招聘信息。"
+            with patch("api.jobs.send_boss_greeting", return_value=SendResult(
+                True, False, "BOSS 已自动发送预设招呼语（非本次自定义文本）",
+                "https://www.zhipin.com/web/geek/chat?jobId=job-id", actual,
+            )):
+                with self.assertRaisesRegex(JobActionError, "预设招呼语"):
+                    send_greeting(db_path, config, "boss", "job-id", "自定义招呼语")
+            with closing(sqlite3.connect(db_path)) as conn:
+                job = JobStore(conn).get_job("boss", "job-id")
+            self.assertEqual(job["greeting_send_state"], "sent")
+            self.assertEqual(job["greeting"], actual)
+            self.assertEqual(job["job_status"], "greeted")
+
     def test_confirm_not_sent_rechecks_boss_before_unlocking(self) -> None:
         config = deepcopy(DEFAULT_CONFIG)
         with TemporaryDirectory() as directory:
@@ -193,6 +307,28 @@ class GreetingSendFlowTests(unittest.TestCase):
             self.assertEqual(recovered["job_status"], "greeted")
             self.assertEqual(recovered["greeting_send_state"], "sent")
             self.assertEqual(recovered["chat_url"], chat_url)
+
+    def test_confirm_not_sent_records_verified_preset_instead_of_unlocking(self) -> None:
+        config = deepcopy(DEFAULT_CONFIG)
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "jobs.sqlite"
+            with closing(sqlite3.connect(db_path)) as conn:
+                store = JobStore(conn, score_threshold=71)
+                store.save({"source_platform": "boss", "source_job_id": "job-id",
+                            "ai_score_status": "scored", "ai_score": 88})
+                store.reserve_greeting_send("boss", "job-id", "自定义招呼语")
+                store.finish_greeting_send("boss", "job-id", outcome="unknown",
+                                           note="BOSS 显示预设招呼语弹窗")
+            actual = "Boss您好，看到贵公司的招聘信息。"
+            with patch("api.jobs.inspect_boss_greeting", return_value=SendResult(
+                True, False, "BOSS 已自动发送预设招呼语（非本次自定义文本）",
+                "https://www.zhipin.com/web/geek/chat?jobId=job-id", actual,
+            )):
+                recovered = confirm_greeting_not_sent(
+                    db_path, config, "boss", "job-id", confirmed=True)
+            self.assertEqual(recovered["greeting_send_state"], "sent")
+            self.assertEqual(recovered["greeting"], actual)
+            self.assertIn("原草稿：自定义招呼语", recovered["greeting_send_note"])
 
     def test_inconclusive_recheck_keeps_send_locked(self) -> None:
         config = deepcopy(DEFAULT_CONFIG)

@@ -69,6 +69,12 @@ class TaskRunStore:
                 finished_at = ? WHERE id = ?""",
                 (status, message, json.dumps(counts, ensure_ascii=False), finished_at, run_id))
 
+    def update_counts(self, run_id: int, counts: dict[str, int]) -> None:
+        with closing(self._connect()) as conn, conn:
+            conn.execute("""UPDATE task_runs SET counts_json = ?
+                WHERE id = ? AND status = 'running'""",
+                (json.dumps(counts, ensure_ascii=False), run_id))
+
     def mark_interrupted(self) -> None:
         """A running task cannot survive a stopped API process."""
         now = datetime.now(timezone.utc).isoformat()
@@ -81,13 +87,19 @@ class TaskRunStore:
         local_now = (now or datetime.now(timezone.utc)).astimezone(LOCAL_ZONE)
         start = datetime.combine(local_now.date(), time.min, LOCAL_ZONE)
         stop = start + timedelta(days=1)
+        start_utc = start.astimezone(timezone.utc).isoformat()
+        stop_utc = stop.astimezone(timezone.utc).isoformat()
         with closing(self._connect()) as conn:
             rows = conn.execute("""SELECT id, task_type, status, message, counts_json,
                 started_at, finished_at FROM task_runs
                 WHERE started_at >= ? AND started_at < ?
                 ORDER BY started_at DESC, id DESC""",
-                (start.astimezone(timezone.utc).isoformat(),
-                 stop.astimezone(timezone.utc).isoformat())).fetchall()
+                (start_utc, stop_utc)).fetchall()
+            has_send_events = conn.execute("""SELECT 1 FROM sqlite_master
+                WHERE type = 'table' AND name = 'greeting_send_events'""").fetchone() is not None
+            greeted_today = conn.execute("""SELECT COUNT(*) FROM greeting_send_events
+                WHERE sent_at >= ? AND sent_at < ?""",
+                (start_utc, stop_utc)).fetchone()[0] if has_send_events else 0
         result = {
             "date": local_now.date().isoformat(),
             "timezone": "Asia/Shanghai",
@@ -98,6 +110,8 @@ class TaskRunStore:
             if task_type not in TASK_TYPES:
                 continue
             counts = json.loads(raw_counts)
+            if task_type == "collection":
+                counts.pop("ai_greeting_generated", None)
             item = {"id": run_id, "status": status, "message": message,
                     "counts": counts, "started_at": started_at,
                     "finished_at": finished_at}
@@ -107,4 +121,5 @@ class TaskRunStore:
             for key, value in counts.items():
                 if isinstance(value, int) and not isinstance(value, bool):
                     bucket["totals"][key] = bucket["totals"].get(key, 0) + value
+        result["collection"]["totals"]["greeted"] = greeted_today
         return result

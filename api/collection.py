@@ -5,6 +5,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
+import sqlite3
 from threading import Lock, Thread
 
 from config import DEFAULT_CONFIG
@@ -79,10 +80,24 @@ class CollectionRun:
             with self.lock:
                 self.message = latest[:500]
 
+    def _progress(self, counts: dict[str, int]) -> None:
+        with self.lock:
+            if self.status != "running":
+                return
+            self.counts = counts.copy()
+            run_id = self.run_id
+        if run_id is not None:
+            try:
+                self.run_store.update_counts(run_id, counts)
+            except sqlite3.Error:
+                # A transient dashboard write must not stop job collection.
+                pass
+
     def _execute(self, config: dict, run_id: int | None = None) -> None:
         try:
             result = run_collection(config, on_record=lambda record: None,
-                                    on_event=self._event, ai_scheduler=self.ai_scheduler)
+                                    on_event=self._event, on_progress=self._progress,
+                                    ai_scheduler=self.ai_scheduler)
         except Exception as exc:
             detail = str(exc).strip()
             with self.lock:
@@ -99,4 +114,5 @@ class CollectionRun:
             with self.lock:
                 status, message = self.status, self.message
                 counts, finished_at = self.counts.copy(), self.finished_at
+            counts.pop("ai_greeting_generated", None)
             self.run_store.finish(run_id, status, message, counts, finished_at)

@@ -46,7 +46,7 @@ export default function CollectionPage({
             {collection.counts.target != null &&
               <span>目标进度 {collection.counts.qualified ?? 0}/{collection.counts.target}</span>}
             <span>入库 {collection.counts.new ?? 0}</span>
-            <span>重复 {collection.counts.duplicate ?? 0}</span>
+            <span>重复岗位 {collection.counts.duplicate_jobs ?? 0}</span>
             <span>预筛排除 {collection.counts.filtered ?? 0}</span>
             {collection.counts.ai_scored != null && <span>AI 已评分 {collection.counts.ai_scored}</span>}
             {collection.counts.ai_score_failed != null && <span>评分失败 {collection.counts.ai_score_failed}</span>}

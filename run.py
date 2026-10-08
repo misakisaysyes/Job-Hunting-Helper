@@ -148,6 +148,7 @@ def run_collection(
     *,
     on_record: Callable[[dict[str, Any]], None],
     on_event: Callable[[str], None] | None = None,
+    on_progress: Callable[[dict[str, int]], None] | None = None,
     ai_scheduler: AITaskScheduler | None = None,
 ) -> PlatformCollectionResult:
     """Run the configured platform collection session and optional AI scoring."""
@@ -167,6 +168,16 @@ def run_collection(
         try:
             max_jobs = config["collection"]["max_jobs"]
             target_jobs = config["collection"]["target_jobs"]
+            progress_counts = {"qualified": 0, "target": target_jobs}
+            if config["ai"]["use_ai_score"]:
+                progress_counts.update(ai_scored=0, ai_score_failed=0)
+
+            def report_counts(counts: dict[str, int] | None = None) -> None:
+                if counts is not None:
+                    progress_counts.update(counts)
+                if on_progress is not None:
+                    on_progress(progress_counts.copy())
+
             if not config["ai"]["use_ai_score"]:
                 qualified = 0
 
@@ -178,6 +189,8 @@ def run_collection(
                         record["greeting"] = template
                     emit_record(record)
                     qualified += 1
+                    progress_counts["qualified"] = qualified
+                    report_counts()
                     if on_event is not None:
                         on_event(f"本轮目标进度 {qualified}/{target_jobs}")
 
@@ -185,6 +198,7 @@ def run_collection(
                     browser=browser, config=config, safety_conn=conn,
                     already_collected=job_store.contains,
                     target_reached=lambda: qualified >= target_jobs,
+                    on_counts=report_counts,
                 )
                 result = runner.run(
                     request, on_job=save_plain,
@@ -223,6 +237,9 @@ def run_collection(
                     qualified += 1
                     if on_event is not None:
                         on_event(f"本轮目标进度 {qualified}/{target_jobs}")
+                progress_counts.update(qualified=qualified, ai_scored=scored,
+                                       ai_score_failed=failed)
+                report_counts()
                 if eligible and config["ai"]["use_ai_greeting"]:
                     try:
                         task = make_greeting_task(
@@ -273,6 +290,7 @@ def run_collection(
                     already_collected=job_store.contains,
                     target_reached=target_reached,
                     on_cycle_complete=lambda: drain_scores(wait_for_all=True),
+                    on_counts=report_counts,
                 )
                 result = runner.run(
                     request, on_job=lambda job: None, on_prefilter_pass=submit_score,
