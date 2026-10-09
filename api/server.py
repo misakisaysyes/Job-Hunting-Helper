@@ -160,12 +160,10 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                 followup_status = query.get("followup_status", [""])[0]
                 try:
                     with closing(sqlite3.connect(db_path, timeout=10)) as conn:
-                        rows, total = ConversationStore(conn).list_conversations(
+                        rows, total = followup_actions.list_conversations(conn, MONITORING_CONFIG,
                             limit=limit, offset=offset, query=keyword,
                             conversation_status=conversation_status,
                             followup_status=followup_status)
-                        followup_actions.annotate_followup_availability(
-                            conn, rows, MONITORING_CONFIG)
                 except sqlite3.Error:
                     self.send_json(500, {"error": "读取会话数据失败"})
                     return
@@ -235,6 +233,15 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                 })
                 return
 
+            parts = request.path.split("/")
+            if (len(parts) == 6 and parts[:3] == ["", "api", "conversations"]
+                    and parts[5] == "followup"):
+                platform, conversation_id = unquote(parts[3]), unquote(parts[4])
+                if not platform or not conversation_id or "/" in platform or "/" in conversation_id:
+                    self.send_json(400, {"error": "缺少平台或会话 ID"})
+                    return
+                self.action_result(lambda: followup_actions.get_followup(db_path, platform, conversation_id))
+                return
             route = self.job_action_route()
             if route is not None and not route[2]:
                 platform, job_id, _ = route
@@ -369,15 +376,27 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                     confirm_still_present=body.get("confirm_still_present") is True))
                 return
             if (len(parts) == 7 and parts[:3] == ["", "api", "conversations"]
-                    and parts[5:] == ["followup", "send"]):
-                if self.read_json() is None:
+                    and parts[5] == "followup" and parts[6] in {"send", "save", "generate"}):
+                body = self.read_json()
+                if body is None:
                     return
                 platform, conversation_id = unquote(parts[3]), unquote(parts[4])
                 if not platform or not conversation_id or "/" in platform or "/" in conversation_id:
                     self.send_json(400, {"error": "缺少平台或会话 ID"})
                     return
-                self.action_result(lambda: followup_actions.send_followup(
-                    db_path, DEFAULT_CONFIG["browser"]["cdp_url"], platform, conversation_id))
+                if parts[6] == "generate":
+                    self.action_result(lambda: followup_actions.generate_followup(
+                        db_path, DEFAULT_CONFIG, scheduler, platform, conversation_id,
+                        body.get("anchor_id", ""), expected_text=body.get("expected_text")))
+                elif parts[6] == "save":
+                    self.action_result(lambda: followup_actions.save_followup(
+                        db_path, platform, conversation_id, body.get("text"),
+                        body.get("anchor_id", ""), expected_text=body.get("expected_text")))
+                else:
+                    self.action_result(lambda: followup_actions.send_followup(
+                        db_path, DEFAULT_CONFIG["browser"]["cdp_url"], platform, conversation_id,
+                        text=body.get("text"), anchor_id=body.get("anchor_id"),
+                        expected_text=body.get("expected_text")))
                 return
             if (len(parts) == 7 and parts[:3] == ["", "api", "conversations"]
                     and parts[5:] == ["monitoring", "terminate"]):

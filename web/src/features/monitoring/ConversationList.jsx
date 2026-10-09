@@ -1,14 +1,7 @@
+import { Fragment } from "react";
 import MonitoringBulkActions from "./MonitoringBulkActions";
 import { monitoringKey } from "./useMonitoringBatch";
-
-function formatTime(value) {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN", {
-    year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hour12: false,
-  });
-}
+import { formatTime } from "./conversationDisplay";
 
 function display(value) {
   return value == null || value === "" ? "—" : String(value);
@@ -19,7 +12,7 @@ const CONVERSATION_STATUS_LABELS = {
   read_no_reply: "已读未回",
 };
 
-export default function ConversationList({ conversations, total, page, pageSize, loading, onPage, onRefresh, onOpen, openingConversation, onFollowupPreview, onTerminate, onDelete, busyAction, busyDelete, filtered, batch, onBatchModeChange }) {
+export default function ConversationList({ conversations, total, page, pageSize, loading, onPage, onRefresh, expanded, onExpanded, renderDetails, onDelete, busyAction, busyDelete, filtered, batch, onBatchModeChange }) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min(total, (page + 1) * pageSize);
   return (
@@ -47,14 +40,14 @@ export default function ConversationList({ conversations, total, page, pageSize,
                 checked={batch.allSelected} disabled={loading || Boolean(batch.busy) || !conversations.length}
                 onChange={(event) => batch.selectAll(event.target.checked)} /></th>}
               <th>岗位 / 公司 / HR</th>
-              <th>会话状态</th>
+              <th>HR检阅状态</th>
+              <th>追问状态</th>
               <th>更新时间<small>入库时间 / 更新时间</small></th>
-              <th>追问语</th>
               <th>操作</th>
             </tr></thead>
             <tbody>{conversations.map((conversation) => {
               const key = monitoringKey(conversation);
-              return <tr key={key}>
+              return <Fragment key={key}><tr>
                 {batch.batchMode && <td className="select-cell"><input type="checkbox"
                   aria-label={`选择会话 ${conversation.company || conversation.recruiter || conversation.conversation_id}`}
                   checked={batch.selectedKeys.has(key)} disabled={loading || Boolean(batch.busy)}
@@ -65,34 +58,32 @@ export default function ConversationList({ conversations, total, page, pageSize,
                   <div className="job-id">{display(conversation.platform)} · {display(conversation.conversation_id)} <span className="dot">·</span> {conversation.in_job_pool ? "池内" : "池外"}</div>
                 </td>
                 <td>{CONVERSATION_STATUS_LABELS[conversation.conversation_status || conversation.judgment] || display(conversation.conversation_status || conversation.judgment)}</td>
+                <td className="followup-availability-cell">
+                  {conversation.followup_cooldown_until ? <>
+                    <span className="followup-availability cooling">冷冻中</span>
+                    <small>预计 {formatTime(conversation.followup_cooldown_until)} 解冻</small>
+                  </> : conversation.followup_eligible
+                    ? <span className="followup-availability available">可追问</span>
+                    : <span title={conversation.followup_reason || undefined}>—</span>}
+                </td>
                 <td className="date-cell">
                   <div className="time-block"><span>入库时间</span><time dateTime={conversation.first_seen_at || undefined}>{formatTime(conversation.first_seen_at)}</time></div>
                   <div className="time-block"><span>更新时间</span><time dateTime={conversation.updated_at || undefined}>{formatTime(conversation.updated_at)}</time></div>
                 </td>
-                <td className="monitoring-followup-cell">
-                  {conversation.followup_eligible
-                    ? <>{conversation.followup_text}<small>待发送</small></>
-                    : <span>{conversation.followup_reason || "当前没有可发送的追问语"}</span>}
-                </td>
                 <td><div className="conversation-actions">
                   <button className="text-button" type="button"
-                    title={!conversation.followup_eligible ? conversation.followup_reason : undefined}
-                    disabled={Boolean(busyAction || batch.busy || !conversation.followup_eligible)}
-                    onClick={() => onFollowupPreview(conversation)}>去追问</button>
-                  <button className="text-button danger-action" type="button" disabled={Boolean(busyAction || batch.busy)}
-                    onClick={() => onTerminate(conversation)}>
-                    {busyAction === key && !busyDelete ? "处理中…" : "终止监测"}
-                  </button>
-                  <button className="text-button" type="button" onClick={() => onOpen(conversation)}
-                    disabled={Boolean(openingConversation || batch.busy)}>
-                    {openingConversation === key ? "定位中…" : "查看会话 ↗"}
-                  </button>
+                    disabled={Boolean(busyAction || batch.busy)} aria-expanded={expanded === key}
+                    aria-controls={`conversation-details-${key}`}
+                    onClick={() => onExpanded(expanded === key ? "" : key)}>{expanded === key ? "收起" : "详情"}</button>
                   <button className="text-button danger-action" type="button" disabled={Boolean(busyAction || batch.busy)}
                     onClick={() => onDelete(conversation)}>
-                    {busyDelete === key ? "删除中…" : "删除记录"}
+                    {busyDelete === key ? "删除中…" : "删除"}
                   </button>
                 </div></td>
               </tr>
+                {expanded === key && <tr className="details-row"><td colSpan={batch.batchMode ? 6 : 5}
+                  id={`conversation-details-${key}`}>{renderDetails(conversation)}</td></tr>}
+              </Fragment>
             })}</tbody>
           </table>
         </div>
@@ -103,8 +94,8 @@ export default function ConversationList({ conversations, total, page, pageSize,
           <button type="button" onClick={() => onPage(page + 1)} disabled={loading || Boolean(batch.busy) || end >= total}>下一页</button></div>
       </div>
       {batch.batchMode && <MonitoringBulkActions label="会话" count={batch.selectedItems.length} batch={batch}
-        actions={[{ key: "followup", label: "批量追问" }, { key: "terminate", label: "批量终止监测" },
-          { key: "delete", label: "批量删除记录", danger: true }]} onClose={batch.close} />}
+        actions={[{ key: "followup", label: "批量追问" }, { key: "terminate", label: "批量终止会话" },
+          { key: "delete", label: "批量删除", danger: true }]} onClose={batch.close} />}
     </section>
   );
 }

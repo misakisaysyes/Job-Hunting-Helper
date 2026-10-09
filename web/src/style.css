@@ -243,12 +243,11 @@ button:disabled {
 }
 
 .monitoring-table { min-width:1100px; }
-.monitoring-conversation-table { min-width:1300px; }
-.monitoring-conversation-table th:nth-child(1) { width:25%; }
-.monitoring-conversation-table th:nth-child(2) { width:11%; }
+.monitoring-conversation-table th:nth-child(1) { width:36%; }
+.monitoring-conversation-table th:nth-child(2) { width:12%; }
 .monitoring-conversation-table th:nth-child(3) { width:18%; }
-.monitoring-conversation-table th:nth-child(4) { width:23%; }
-.monitoring-conversation-table th:nth-child(5) { width:23%; }
+.monitoring-conversation-table th:nth-child(4) { width:22%; }
+.monitoring-conversation-table th:nth-child(5) { width:12%; }
 .monitoring-filter-table th:nth-child(1) { width:28%; }
 .monitoring-filter-table th:nth-child(2) { width:16%; }
 .monitoring-filter-table th:nth-child(3) { width:16%; }
@@ -257,11 +256,11 @@ button:disabled {
 .monitoring-batch-table th.select-cell,
 .monitoring-batch-table td.select-cell { width:48px; padding-left:18px; padding-right:4px; }
 .monitoring-batch-table th:not(.select-cell) { width:auto; }
-.monitoring-conversation-table.monitoring-batch-table th:nth-child(2) { width:24%; }
-.monitoring-conversation-table.monitoring-batch-table th:nth-child(3) { width:10%; }
-.monitoring-conversation-table.monitoring-batch-table th:nth-child(4) { width:18%; }
-.monitoring-conversation-table.monitoring-batch-table th:nth-child(5) { width:22%; }
-.monitoring-conversation-table.monitoring-batch-table th:nth-child(6) { width:22%; }
+.monitoring-conversation-table.monitoring-batch-table th:nth-child(2) { width:35%; }
+.monitoring-conversation-table.monitoring-batch-table th:nth-child(3) { width:11%; }
+.monitoring-conversation-table.monitoring-batch-table th:nth-child(4) { width:17%; }
+.monitoring-conversation-table.monitoring-batch-table th:nth-child(5) { width:21%; }
+.monitoring-conversation-table.monitoring-batch-table th:nth-child(6) { width:12%; }
 .monitoring-batch-table td:nth-child(2),
 .monitoring-batch-table td:nth-child(3),
 .monitoring-batch-table td:nth-child(4),
@@ -277,17 +276,17 @@ button:disabled {
 .conversation-actions .danger-action { color:#c94848; }
 .conversation-actions .text-button,.filter-actions .text-button { margin-right:0; }
 .conversation-actions .text-button:disabled { color:#a4adba; cursor:not-allowed; text-decoration:none; }
-.monitoring-followup-cell { color:#536176; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
-.monitoring-followup-cell span { color:#98a4b3; }
-.monitoring-followup-cell small { display:block; margin-top:6px; color:#73839a; }
+.followup-availability { display:inline-block; border-radius:5px; padding:4px 8px; font-size:12px; font-weight:700; white-space:nowrap; }
+.followup-availability.available { background:#e8f6ef; color:#168253; }
+.followup-availability.cooling { background:#edf4ff; color:#4c78ab; }
+.followup-availability-cell small { display:block; margin-top:7px; color:#7e8da3; font-size:11px; line-height:1.5; }
+.monitoring-followup-card .text-button { margin-right:0; }
 .followup-modal-backdrop { position:fixed; inset:0; z-index:100; background:rgba(26,39,60,.44); display:grid; place-items:center; padding:20px; }
 .followup-modal { width:min(540px,100%); max-height:calc(100vh - 40px); overflow:auto; background:#fff; border:1px solid #dce5f0; border-radius:16px; box-shadow:0 18px 60px rgba(25,43,70,.22); padding:24px; }
 .followup-modal-heading { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; }
 .followup-modal-heading h3 { margin:0; color:#25334c; }
 .followup-modal-heading p { margin:8px 0 0; color:#73839a; }
 .followup-modal-heading button { border:0; background:none; color:#73839a; font-size:26px; cursor:pointer; }
-.followup-modal-text,.followup-modal-unavailable { margin:22px 0; padding:18px; border:1px solid #dce5f0; border-radius:10px; background:#f7f9fc; color:#25334c; white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.7; }
-.followup-modal-unavailable { color:#73839a; }
 .followup-modal-actions { display:flex; justify-content:flex-end; align-items:center; gap:12px; }
 .followup-modal-actions > button:first-child { border:1px solid #dce5f0; border-radius:8px; padding:9px 18px; background:#fff; color:#34465c; cursor:pointer; }
 .filter-actions { display:flex; flex-wrap:wrap; gap:8px 12px; }

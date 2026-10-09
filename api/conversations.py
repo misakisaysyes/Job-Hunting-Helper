@@ -12,11 +12,17 @@ from data.conversation_store import ConversationStore
 from data.filter_store import FilterStore
 
 
-def _locate_boss_chat(config: dict, conversation_id: str, tab_label: str) -> dict:
+def _show_boss_chat(config: dict, conversation_id: str, tab_label: str,
+                    *, open_chat: bool = False) -> dict:
     browser = None
     try:
         browser = ChromeBrowser(config["browser"]["cdp_url"])
-        if not browser.locate_user_conversation(conversation_id, tab_label):
+        if open_chat:
+            located = browser.open_user_conversation(
+                "https://www.zhipin.com/web/geek/chat", conversation_id, tab_label)
+        else:
+            located = browser.locate_user_conversation(conversation_id, tab_label)
+        if not located:
             raise JobActionError(f"未能在 BOSS「{tab_label}」中定位目标会话，请刷新监测列表后重试", 409)
     except JobActionError:
         raise
@@ -25,6 +31,8 @@ def _locate_boss_chat(config: dict, conversation_id: str, tab_label: str) -> dic
     finally:
         if browser is not None:
             browser.close()
+    if open_chat:
+        return {"message": f"已在采集用 Chrome 打开 BOSS「{tab_label}」中的目标会话"}
     return {"message": f"已在 BOSS「{tab_label}」列表中定位会话，请点击列表中的会话查看"}
 
 
@@ -36,7 +44,7 @@ def open_filter_candidate(db_path: Path, config: dict, platform: str,
         candidate = FilterStore(conn).get_candidate(platform, conversation_id)
     if candidate is None:
         raise JobActionError("过滤候选不存在", 404)
-    return _locate_boss_chat(config, conversation_id, "新招呼")
+    return _show_boss_chat(config, conversation_id, "新招呼")
 
 
 def terminate_monitoring(db_path: Path, platform: str, conversation_id: str) -> dict:
@@ -68,4 +76,4 @@ def open_conversation(db_path: Path, config: dict, platform: str,
         conversation = ConversationStore(conn).get_conversation(platform, conversation_id)
     if conversation is None:
         raise JobActionError("会话不存在", 404)
-    return _locate_boss_chat(config, conversation_id, "仅沟通")
+    return _show_boss_chat(config, conversation_id, "仅沟通", open_chat=True)

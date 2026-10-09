@@ -78,7 +78,7 @@
 .greeting-actions { display:flex; align-items:center; gap:8px; }
 .greeting-action-divider { width:1px; height:14px; background:#cbd5e1; }
 
-.greeting-card textarea {
+.greeting-card textarea,.monitoring-followup-card textarea {
   display:block;
   box-sizing:border-box;
   width:100%;
@@ -94,13 +94,13 @@
   line-height:1.6;
 }
 
-.greeting-card textarea:focus { outline:2px solid #b8d8f4; border-color:#77abe0; }
-.greeting-card textarea:disabled { background:#f5f7f9; }
+.greeting-card textarea:focus,.monitoring-followup-card textarea:focus { outline:2px solid #b8d8f4; border-color:#77abe0; }
+.greeting-card textarea:disabled,.monitoring-followup-card textarea:disabled { background:#f5f7f9; }
 .greeting-footer { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:12px; }
 .greeting-footer span { color:#8792a2; font-size:12px; }
 
 .greeting-actions .text-button { margin-right:0; }
-.greeting-card button:disabled { opacity:.5; cursor:not-allowed; }
+.greeting-card button:disabled,.monitoring-followup-card button:disabled { opacity:.5; cursor:not-allowed; }
 
 .job-details .detail-warning { color:#9f6a14; }
 .detail-warning .text-button { margin-left:10px; margin-right:0; }

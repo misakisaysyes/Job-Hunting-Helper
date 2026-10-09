@@ -45,8 +45,20 @@ export function openFilterCandidate(platform, conversationId) {
   return requestJson(`/api/filter-candidates/${encodeURIComponent(platform)}/${encodeURIComponent(conversationId)}/open`, jsonOptions("POST"));
 }
 
-export function sendFollowup(platform, conversationId) {
-  return requestJson(`/api/conversations/${encodeURIComponent(platform)}/${encodeURIComponent(conversationId)}/followup/send`, jsonOptions("POST"));
+export function getFollowup(platform, conversationId) {
+  return requestJson(`/api/conversations/${encodeURIComponent(platform)}/${encodeURIComponent(conversationId)}/followup`);
+}
+
+export function saveFollowup(platform, conversationId, options) {
+  return requestJson(`/api/conversations/${encodeURIComponent(platform)}/${encodeURIComponent(conversationId)}/followup/save`, jsonOptions("POST", options));
+}
+
+export function generateFollowup(platform, conversationId, options) {
+  return requestJson(`/api/conversations/${encodeURIComponent(platform)}/${encodeURIComponent(conversationId)}/followup/generate`, jsonOptions("POST", options));
+}
+
+export function sendFollowup(platform, conversationId, options = {}) {
+  return requestJson(`/api/conversations/${encodeURIComponent(platform)}/${encodeURIComponent(conversationId)}/followup/send`, jsonOptions("POST", options));
 }
 
 export function terminateMonitoring(platform, conversationId) {

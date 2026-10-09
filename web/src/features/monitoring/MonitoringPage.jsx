@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { confirmFilterDelete, deleteConversationRecord, deleteFilterRecord, getCurrentMonitoring, listConversations, listFilterCandidates, openConversation, openFilterCandidate, sendFollowup, startMonitoring, terminateMonitoring } from "../../api/monitoring";
 import ConversationList from "./ConversationList";
+import ConversationDetails from "./ConversationDetails";
+import { savedFollowupText } from "./conversationDisplay";
 import FilterCandidateList from "./FilterCandidateList";
 import MonitoringStatus from "./MonitoringStatus";
 import useMonitoringBatch from "./useMonitoringBatch";
@@ -26,7 +28,8 @@ export default function MonitoringPage() {
   const [openingConversation, setOpeningConversation] = useState("");
   const [openNotice, setOpenNotice] = useState(null);
   const [busyFollowup, setBusyFollowup] = useState("");
-  const [previewConversation, setPreviewConversation] = useState(null);
+  const [followupDrafts, setFollowupDrafts] = useState({});
+  const [expandedConversation, setExpandedConversation] = useState("");
   const [busyTerminate, setBusyTerminate] = useState("");
   const [busyConversationDelete, setBusyConversationDelete] = useState("");
   const [filterCandidates, setFilterCandidates] = useState([]);
@@ -43,24 +46,43 @@ export default function MonitoringPage() {
   const [filterNotice, setFilterNotice] = useState(null);
   const [openingFilterCandidate, setOpeningFilterCandidate] = useState("");
 
+  function followupText(conversation) {
+    const draft = followupDrafts[`${conversation.platform}:${conversation.conversation_id}`];
+    if (draft && draft.anchor === conversation.followup_anchor_id
+        && draft.savedText === conversation.followup_text
+        && conversation.followup_status === "pending_review") return draft.text;
+    return savedFollowupText(conversation);
+  }
+
+  function editFollowup(conversation, text) {
+    const key = `${conversation.platform}:${conversation.conversation_id}`;
+    setFollowupDrafts((previous) => ({ ...previous, [key]: {
+      anchor: conversation.followup_anchor_id, savedText: conversation.followup_text, text,
+    } }));
+  }
+
   const conversationBatch = useMonitoringBatch({
-    items: conversations, page,
+    items: conversations.map((item) => ({ ...item, saved_followup_text: item.followup_text,
+      followup_text: followupText(item) })), page,
     filters: `${conversationQuery}\u0000${conversationStatus}\u0000${followupStatus}`,
     loading: listLoading || Boolean(busyFollowup || busyTerminate || busyConversationDelete || openingConversation),
     onReload: () => setListVersion((version) => version + 1),
     actions: {
       followup: {
         label: "追问", preview: true, stopOnFailure: true,
-        eligible: (item) => Boolean(item.followup_eligible),
-        perform: (item) => sendFollowup(item.platform, item.conversation_id),
+        eligible: (item) => Boolean(item.followup_eligible && item.followup_text.trim()
+          && item.followup_text.trim().length <= 300),
+        perform: (item) => sendFollowup(item.platform, item.conversation_id,
+          { text: item.followup_text, anchor_id: item.followup_anchor_id,
+            expected_text: item.saved_followup_text }),
       },
       terminate: {
-        label: "终止监测", eligible: (item) => item.followup_status !== "sending",
-        confirm: (count, skipped) => `确定终止监测所选 ${count} 条会话吗？后续扫描会跳过这些会话。${skipped ? `另有 ${skipped} 条将跳过。` : ""}`,
+        label: "终止会话", eligible: (item) => item.followup_status !== "sending",
+        confirm: (count, skipped) => `确定终止所选 ${count} 条会话吗？后续扫描会跳过这些会话。${skipped ? `另有 ${skipped} 条将跳过。` : ""}`,
         perform: (item) => terminateMonitoring(item.platform, item.conversation_id),
       },
       delete: {
-        label: "删除记录", eligible: (item) => item.followup_status !== "sending",
+        label: "删除", eligible: (item) => item.followup_status !== "sending",
         confirm: (count, skipped) => `确定从本地数据库删除所选 ${count} 条会话及消息吗？这不会删除 BOSS 会话；后续扫描可能再次入库。${skipped ? `另有 ${skipped} 条将跳过。` : ""}`,
         perform: (item) => deleteConversationRecord(item.platform, item.conversation_id),
       },
@@ -96,6 +118,8 @@ export default function MonitoringPage() {
     const timer = window.setTimeout(() => setFilterQuery(filterSearch.trim()), 250);
     return () => window.clearTimeout(timer);
   }, [filterSearch]);
+
+  useEffect(() => { setExpandedConversation(""); }, [page, conversationQuery, conversationStatus, followupStatus]);
 
   useEffect(() => {
     let active = true;
@@ -150,6 +174,15 @@ export default function MonitoringPage() {
   }, [filterPage, listVersion, filterRefreshVersion, filterQuery, filterStatus]);
 
   useEffect(() => {
+    const deadlines = conversations.map((item) => Date.parse(item.followup_cooldown_until))
+      .filter(Number.isFinite);
+    if (!deadlines.length) return;
+    const delay = Math.min(2_147_483_647, Math.max(0, Math.min(...deadlines) - Date.now()) + 1000);
+    const timer = window.setTimeout(() => setConversationRefreshVersion((version) => version + 1), delay);
+    return () => window.clearTimeout(timer);
+  }, [conversations]);
+
+  useEffect(() => {
     if (monitoring.status !== "running") return;
     let active = true;
     let timer;
@@ -198,7 +231,7 @@ export default function MonitoringPage() {
     setOpenNotice(null);
     try {
       const result = await openConversation(conversation.platform, conversation.conversation_id);
-      setOpenNotice({ type: "success", text: result.message || "已在 BOSS「仅沟通」列表中定位会话" });
+      setOpenNotice({ type: "success", text: result.message || "已在 Chrome 打开对应的 BOSS 会话" });
     } catch (cause) {
       setOpenNotice({ type: "error", text: cause.message || "打开会话失败" });
     } finally {
@@ -206,35 +239,47 @@ export default function MonitoringPage() {
     }
   }
 
-  async function handleFollowup(conversation) {
+  function updateFollowup(conversation, { preserveDraft = false } = {}) {
     const key = `${conversation.platform}:${conversation.conversation_id}`;
-    setBusyFollowup(key);
+    if (!preserveDraft) {
+      setFollowupDrafts((previous) => {
+        const next = { ...previous };
+        delete next[key];
+        return next;
+      });
+    }
+    setConversations((previous) => previous.map((item) =>
+      item.platform === conversation.platform && item.conversation_id === conversation.conversation_id
+        ? { ...item, ...conversation } : item));
+  }
+
+  async function handleFollowup(conversation, text) {
     setOpenNotice(null);
     try {
-      const result = await sendFollowup(conversation.platform, conversation.conversation_id);
+      const result = await sendFollowup(conversation.platform, conversation.conversation_id,
+        { text, anchor_id: conversation.followup_anchor_id, expected_text: conversation.followup_text });
       setOpenNotice({ type: "success", text: result.message || "追问已发送" });
-      setPreviewConversation(null);
       setListVersion((version) => version + 1);
+      return result;
     } catch (cause) {
       setOpenNotice({ type: "error", text: cause.message || "追问操作失败，请刷新查看状态" });
       setListVersion((version) => version + 1);
-    } finally {
-      setBusyFollowup("");
+      throw cause;
     }
   }
 
   async function handleTerminate(conversation) {
-    if (!window.confirm(`终止监测「${conversation.recruiter || conversation.company || conversation.conversation_id}」？后续监测将跳过这条会话。`)) return;
+    if (!window.confirm(`终止会话「${conversation.recruiter || conversation.company || conversation.conversation_id}」？后续监测将跳过这条会话。`)) return;
     const key = `${conversation.platform}:${conversation.conversation_id}`;
     setBusyTerminate(key);
     setOpenNotice(null);
     try {
-      const result = await terminateMonitoring(conversation.platform, conversation.conversation_id);
-      setOpenNotice({ type: "success", text: result.message });
-      setPreviewConversation(null);
+      await terminateMonitoring(conversation.platform, conversation.conversation_id);
+      setOpenNotice({ type: "success", text: "已终止会话，后续扫描将跳过该会话" });
+      setExpandedConversation("");
       setListVersion((version) => version + 1);
     } catch (cause) {
-      setOpenNotice({ type: "error", text: cause.message || "终止监测失败" });
+      setOpenNotice({ type: "error", text: cause.message || "终止会话失败" });
     } finally {
       setBusyTerminate("");
     }
@@ -248,7 +293,7 @@ export default function MonitoringPage() {
     try {
       const result = await deleteConversationRecord(conversation.platform, conversation.conversation_id);
       setOpenNotice({ type: "success", text: result.message || "本地会话记录已删除" });
-      setPreviewConversation(null);
+      setExpandedConversation("");
     } catch (cause) {
       setOpenNotice({ type: "error", text: cause.message || "删除本地会话记录失败" });
     } finally {
@@ -330,15 +375,17 @@ export default function MonitoringPage() {
         <input type="search" aria-label="搜索会话" placeholder="搜索岗位、公司、HR 或会话 ID"
           disabled={Boolean(conversationBatch.busy)}
           value={conversationSearch} onChange={(event) => { setPage(0); setConversationSearch(event.target.value); }} />
-        <select aria-label="筛选会话状态" value={conversationStatus} disabled={Boolean(conversationBatch.busy)}
+        <select aria-label="筛选HR检阅状态" value={conversationStatus} disabled={Boolean(conversationBatch.busy)}
           onChange={(event) => { setPage(0); setConversationStatus(event.target.value); }}>
-          <option value="">全部会话状态</option>
+          <option value="">全部HR检阅状态</option>
           <option value="unread">未读</option>
           <option value="read_no_reply">已读未回</option>
         </select>
         <select aria-label="筛选追问状态" value={followupStatus} disabled={Boolean(conversationBatch.busy)}
           onChange={(event) => { setPage(0); setFollowupStatus(event.target.value); }}>
           <option value="">全部追问状态</option>
+          <option value="available">可追问</option>
+          <option value="cooling">冷冻中</option>
           <option value="pending_review">追问语待发送</option>
           <option value="followed_up">已追问</option>
           <option value="failed">发送失败</option>
@@ -351,8 +398,15 @@ export default function MonitoringPage() {
       <ConversationList conversations={conversations} total={total} page={page} pageSize={PAGE_SIZE}
         loading={listLoading} onPage={setPage}
         onRefresh={() => setConversationRefreshVersion((version) => version + 1)}
-        onOpen={openChat} openingConversation={openingConversation}
-        onFollowupPreview={setPreviewConversation} onTerminate={handleTerminate}
+        expanded={expandedConversation} onExpanded={setExpandedConversation}
+        renderDetails={(conversation) => <ConversationDetails conversation={conversation}
+          draft={followupText(conversation)} onDraftChange={(text) => editFollowup(conversation, text)}
+          onChange={updateFollowup} onSend={handleFollowup} onOpen={openChat}
+          openingConversation={openingConversation}
+          onTerminate={handleTerminate} terminatingConversation={busyTerminate}
+          disabled={Boolean(busyFollowup || busyTerminate || busyConversationDelete || conversationBatch.busy || filterBatch.busy)}
+          onBusyChange={(action) => setBusyFollowup(action
+            ? `${conversation.platform}:${conversation.conversation_id}` : "")} />}
         onDelete={handleConversationDelete} busyAction={busyFollowup || busyTerminate || busyConversationDelete || filterBatch.busy}
         busyDelete={busyConversationDelete}
         batch={conversationBatch} onBatchModeChange={(enabled) => {
@@ -379,26 +433,6 @@ export default function MonitoringPage() {
             <button className="start-button" type="button" onClick={() => conversationBatch.execute(
               conversationBatch.preview.actionName, conversationBatch.preview.eligible, conversationBatch.preview.skipped
             )}>发送追问</button>
-          </div>
-        </section>
-      </div>}
-      {previewConversation && <div className="followup-modal-backdrop" onMouseDown={() => !busyFollowup && setPreviewConversation(null)}>
-        <section className="followup-modal" role="dialog" aria-modal="true" aria-labelledby="followup-preview-title"
-          onMouseDown={(event) => event.stopPropagation()}>
-          <div className="followup-modal-heading">
-            <div><h3 id="followup-preview-title">追问语预览</h3>
-              <p>{previewConversation.company || "未知公司"} · {previewConversation.recruiter || "未知 HR"}</p></div>
-            <button type="button" aria-label="关闭追问语预览" disabled={Boolean(busyFollowup)}
-              onClick={() => setPreviewConversation(null)}>×</button>
-          </div>
-          {previewConversation.followup_eligible ? (
-            <p className="followup-modal-text">{previewConversation.followup_text}</p>
-          ) : <p className="followup-modal-unavailable">{previewConversation.followup_reason || "当前没有可发送的追问语。"}</p>}
-          <div className="followup-modal-actions">
-            <button type="button" onClick={() => setPreviewConversation(null)} disabled={Boolean(busyFollowup)}>关闭</button>
-            <button className="start-button" type="button"
-              disabled={Boolean(busyFollowup) || !previewConversation.followup_eligible}
-              onClick={() => handleFollowup(previewConversation)}>{busyFollowup ? "发送中…" : "发送追问"}</button>
           </div>
         </section>
       </div>}

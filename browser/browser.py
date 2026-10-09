@@ -10,6 +10,28 @@ from patchright.sync_api import TimeoutError as BrowserTimeout
 from patchright.sync_api import sync_playwright
 
 
+_BOSS_CHAT_ROW_MATCHES = """({avatar, name, brand, selectedOnly = false}) => {
+    const avatarKey = value => {
+        try {
+            const url = new URL(value, location.href);
+            return url.origin + url.pathname;
+        } catch (_) { return ''; }
+    };
+    const key = avatarKey(avatar);
+    const rows = [...document.querySelectorAll('.friend-content')];
+    const matches = rows.flatMap((node, index) => {
+        const text = node.innerText || '';
+        const src = node.querySelector('img.image-circle')?.src;
+        return key && src && avatarKey(src) === key
+            && (!name || text.includes(name)) && (!brand || text.includes(brand))
+            ? [index] : [];
+    });
+    if (!selectedOnly) return matches;
+    return matches.length === 1 && rows[matches[0]].classList.contains('selected')
+        && rows.filter(node => node.classList.contains('selected')).length === 1;
+}"""
+
+
 class ChromeBrowser:
     def __init__(self, cdp_url: str = "http://127.0.0.1:9222") -> None:
         self._playwright = sync_playwright().start()
@@ -75,13 +97,23 @@ class ChromeBrowser:
         finally:
             session.detach()
 
-    def open_user_conversation(self, url: str, conversation_id: str) -> bool:
+    def open_user_conversation(self, url: str, conversation_id: str,
+                               tab_label: str = "仅沟通") -> bool:
         """Open a BOSS chat tab and select the exact recruiter conversation."""
+        return self._show_user_conversation(url, conversation_id, tab_label, select=True)
+
+    def locate_user_conversation(self, conversation_id: str,
+                                 tab_label: str = "仅沟通") -> bool:
+        """Show and highlight a BOSS list row without entering the conversation."""
+        return self._show_user_conversation("https://www.zhipin.com/web/geek/chat",
+                                            conversation_id, tab_label, select=False)
+
+    def _show_user_conversation(self, url: str, conversation_id: str,
+                                tab_label: str, *, select: bool) -> bool:
         page = None
-        selected = False
+        located = False
         try:
             page = self._context.new_page()
-
             friends: dict[str, dict[str, Any]] = {}
 
             def collect_response(response: Any) -> None:
@@ -104,101 +136,54 @@ class ChromeBrowser:
                 pass
             if not page.url.startswith("https://www.zhipin.com/web/geek/chat"):
                 return False
-            page.locator(".friend-content").first.wait_for(state="attached", timeout=15000)
-
-            for _ in range(25):
-                friend = friends.get(conversation_id)
-                avatar = str((friend or {}).get("avatar") or "").split("?", 1)[0]
-                if avatar:
-                    matches = page.evaluate("""avatar => [...document.querySelectorAll('.friend-content')]
-                        .flatMap((item, index) => item.querySelector('img.image-circle')?.src
-                            .split('?')[0] === avatar ? [index] : [])""", avatar)
-                    if len(matches) == 1:
-                        item = page.locator(".friend-content").nth(matches[0])
-                        item.click(timeout=5000)
-                        page.wait_for_function("""avatar => [...document.querySelectorAll('.friend-content')]
-                            .some(item => item.classList.contains('selected') &&
-                                item.querySelector('img.image-circle')?.src.split('?')[0] === avatar)""",
-                            arg=avatar, timeout=5000)
-                        page.bring_to_front()
-                        selected = True  # Leave the verified conversation tab open.
-                        return True
-                page.evaluate("""() => {
-                    const list = document.querySelector('.user-list-content');
-                    if (list) list.scrollTop = list.scrollHeight;
-                }""")
-                page.wait_for_timeout(350)
-            return False
-        except Exception:
-            return False
-        finally:
-            if page is not None and not selected:
-                try:
-                    page.close()
-                except Exception:
-                    pass
-
-    def locate_user_conversation(self, conversation_id: str,
-                                 tab_label: str = "仅沟通") -> bool:
-        """Show and highlight a BOSS list row without entering the conversation."""
-        page = None
-        located = False
-        try:
-            page = self._context.new_page()
-            friends: dict[str, dict[str, Any]] = {}
-
-            def collect_response(response: Any) -> None:
-                if "/wapi/zprelation/friend/getGeekFriendList.json" not in response.url:
-                    return
-                try:
-                    body = response.json()
-                    if body.get("code") == 0:
-                        for row in (body.get("zpData") or {}).get("result") or []:
-                            uid = str(row.get("uid") or "")
-                            if uid:
-                                friends[uid] = row
-                except Exception:
-                    pass
-
-            page.on("response", collect_response)
-            try:
-                page.goto("https://www.zhipin.com/web/geek/chat",
-                          wait_until="domcontentloaded", timeout=20000)
-            except BrowserTimeout:
-                pass
-            if not page.url.startswith("https://www.zhipin.com/web/geek/chat"):
-                return False
-            page.locator(".friend-content").first.wait_for(state="attached", timeout=15000)
             tab = page.locator("li").filter(has_text=tab_label).first
             tab.click(timeout=10000)
-            page.wait_for_timeout(400)
-            if "selected" not in (tab.get_attribute("class") or "").split():
-                return False
+            page.wait_for_function("""label => [...document.querySelectorAll('li')]
+                .some(node => node.textContent.includes(label)
+                    && node.classList.contains('selected'))""", arg=tab_label, timeout=10000)
+            page.locator(".friend-content").first.wait_for(state="attached", timeout=15000)
+            page.evaluate("""() => {
+                const list = document.querySelector('.user-list-content');
+                if (list) list.scrollTop = 0;
+            }""")
 
-            for _ in range(45):
+            previous_state = None
+            idle_rounds = 0
+            for _ in range(120):
                 friend = friends.get(conversation_id)
-                avatar = str((friend or {}).get("avatar") or "").split("?", 1)[0]
-                if avatar:
-                    matches = page.evaluate("""avatar => [...document.querySelectorAll('.friend-content')]
-                        .flatMap((item, index) => item.querySelector('img.image-circle')?.src
-                            .split('?')[0] === avatar ? [index] : [])""", avatar)
+                if friend and friend.get("avatar"):
+                    identity = {"avatar": str(friend["avatar"]),
+                                "name": str(friend.get("name") or ""),
+                                "brand": str(friend.get("brandName") or "")}
+                    matches = page.evaluate(_BOSS_CHAT_ROW_MATCHES, identity)
                     if len(matches) == 1:
                         item = page.locator(".friend-content").nth(matches[0])
                         item.scroll_into_view_if_needed(timeout=5000)
-                        item.evaluate("""element => {
-                            element.style.outline = '3px solid #1976e8';
-                            element.style.outlineOffset = '-3px';
-                            element.style.backgroundColor = '#edf5ff';
-                        }""")
+                        if select:
+                            item.click(timeout=5000)
+                            page.wait_for_function(_BOSS_CHAT_ROW_MATCHES,
+                                arg={**identity, "selectedOnly": True}, timeout=8000)
+                        else:
+                            item.evaluate("""element => {
+                                element.style.outline = '3px solid #1976e8';
+                                element.style.outlineOffset = '-3px';
+                                element.style.backgroundColor = '#edf5ff';
+                            }""")
                         page.bring_to_front()
                         located = True
                         return True
-                page.evaluate("""() => {
+                scroll_state = page.evaluate("""() => {
                     const list = document.querySelector('.user-list-content');
-                    if (list) list.scrollTop = Math.min(
-                        list.scrollTop + Math.max(list.clientHeight * .8, 300),
-                        list.scrollHeight);
+                    if (!list) return null;
+                    list.scrollTop += Math.max(list.clientHeight * .8, 300);
+                    return {top: list.scrollTop, height: list.scrollHeight,
+                        rows: document.querySelectorAll('.friend-content').length};
                 }""")
+                state = (scroll_state, len(friends))
+                idle_rounds = idle_rounds + 1 if state == previous_state else 0
+                if idle_rounds >= 12:
+                    break
+                previous_state = state
                 page.wait_for_timeout(250)
             return False
         except Exception:

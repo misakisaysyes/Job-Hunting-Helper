@@ -8,10 +8,56 @@ from typing import Any
 
 
 MONITORED_STATUSES = frozenset({"unread", "read_no_reply"})
+_BOSS_DEFAULT_GREETING = "Boss您好，看到贵公司的招聘信息，希望能得到贵公司的垂青，谢谢"
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def resolve_original_greeting(messages: list[dict[str, Any]], job: dict[str, Any] | None) -> str:
+    """Prefer the custom greeting actually delivered over BOSS's opening card."""
+    opening = next((message for message in messages
+                    if message.get("sender") == "self"
+                    and str(message.get("biz_type") or "") == "101"
+                    and str(message.get("delivery_status") or "") not in {"0", "3", "4"}
+                    and str(message.get("text") or "").strip()), None)
+    if opening and str(opening["text"]).strip() == _BOSS_DEFAULT_GREETING:
+        # BOSS can send this card before the app sends its custom greeting.
+        # Only consider the first delivered plain text in that initial send sequence.
+        after_opening = False
+        for message in messages:
+            if message is opening:
+                after_opening = True
+                continue
+            if not after_opening or str(message.get("biz_type") or "") not in {"", "0", "1", "101"}:
+                continue
+            if not str(message.get("text") or "").strip():
+                continue
+            if message.get("sender") != "self":
+                break
+            if str(message.get("delivery_status") or "") not in {"1", "2"}:
+                break
+            try:
+                start, sent = (float(str(item.get("sent_at"))) for item in (opening, message))
+                start = start / 1000 if start > 1e11 else start
+                sent = sent / 1000 if sent > 1e11 else sent
+                if 0 <= sent - start <= 120:
+                    return str(message["text"]).strip()
+            except (TypeError, ValueError, OverflowError):
+                pass
+            break
+    saved = str((job or {}).get("greeting") or "").strip()
+    if saved:
+        actual = next((message for message in messages
+                       if message.get("sender") == "self"
+                       and str(message.get("delivery_status") or "") in {"1", "2"}
+                       and str(message.get("text") or "").strip() == saved), None)
+        if actual:
+            return str(actual["text"]).strip()
+        if (job or {}).get("greeting_send_state") == "sent":
+            return saved
+    return str((opening or {}).get("text") or "").strip()
 
 
 class ConversationStore:
@@ -224,24 +270,31 @@ class ConversationStore:
             ORDER BY updated_at DESC, platform, conversation_id LIMIT ? OFFSET ?""",
             [*params, limit, offset]).fetchall()
         conversations = [dict(zip(columns, row)) for row in rows]
-        has_job_greetings = bool(self.conn.execute("""SELECT 1 FROM sqlite_master
-            WHERE type = 'table' AND name = 'collected_jobs'""").fetchone())
         for item in conversations:
             item["in_job_pool"] = bool(item["in_job_pool"])
             item["conversation_status"] = item["judgment"]
-            greeting = self.conn.execute("""SELECT text FROM monitored_messages
-                WHERE platform = ? AND conversation_id = ? AND sender = 'self'
-                  AND biz_type = '101' AND text != ''
-                ORDER BY CAST(message_id AS INTEGER) ASC LIMIT 1""",
-                (item["platform"], item["conversation_id"])).fetchone()
-            greeting_text = greeting[0] if greeting else item["followup_text"]
-            if not greeting_text and has_job_greetings and item["source_job_id"]:
-                job_greeting = self.conn.execute("""SELECT greeting FROM collected_jobs
-                    WHERE platform = ? AND source_job_id = ? LIMIT 1""",
-                    (item["platform"], item["source_job_id"])).fetchone()
-                greeting_text = job_greeting[0] if job_greeting else ""
-            item["greeting_text"] = greeting_text
+            item["greeting_text"] = self.original_greeting(
+                item["platform"], item["conversation_id"], item["source_job_id"])
         return conversations, total
+
+    def original_greeting(self, platform: str, conversation_id: str,
+                          source_job_id: str = "") -> str:
+        """Resolve the original greeting from actual messages and send evidence."""
+        names = ("sender", "text", "delivery_status", "biz_type", "sent_at")
+        messages = [dict(zip(names, row)) for row in self.conn.execute("""SELECT
+            sender, text, delivery_status, biz_type, sent_at FROM monitored_messages
+            WHERE platform = ? AND conversation_id = ?
+            ORDER BY CAST(message_id AS INTEGER), message_id""", (platform, conversation_id))]
+        job = None
+        has_jobs = self.conn.execute("""SELECT 1 FROM sqlite_master
+            WHERE type = 'table' AND name = 'collected_jobs'""").fetchone()
+        if has_jobs and source_job_id:
+            row = self.conn.execute("""SELECT greeting, greeting_send_state FROM collected_jobs
+                WHERE platform = ? AND source_job_id = ?""",
+                (platform, source_job_id)).fetchone()
+            if row:
+                job = dict(zip(("greeting", "greeting_send_state"), row))
+        return resolve_original_greeting(messages, job)
 
     def get_conversation(self, platform: str, conversation_id: str) -> dict[str, Any] | None:
         columns = ("platform", "conversation_id", "source_job_id", "job_title", "company",
@@ -260,6 +313,7 @@ class ConversationStore:
         result["in_job_pool"] = bool(result["in_job_pool"])
         result["active"] = bool(result["active"])
         result["conversation_status"] = result["judgment"]
+        result["greeting_text"] = self.original_greeting(platform, conversation_id, result["source_job_id"])
         return result
 
     def prepare_followup(self, platform: str, conversation_id: str,
@@ -274,6 +328,19 @@ class ConversationStore:
               AND followup_status IN ('none', 'idle', 'stale')
               AND judgment IN ('unread', 'read_no_reply')""",
             (text, anchor_id, now, platform, conversation_id))
+        self.conn.commit()
+        return cursor.rowcount == 1
+
+    def save_followup(self, platform: str, conversation_id: str, text: str,
+                      anchor_id: str, *, expected_text: str | None = None) -> bool:
+        """Edit a draft only while its conversation and source message still match."""
+        cursor = self.conn.execute("""UPDATE monitored_conversations
+            SET followup_text = ?, followup_error = '', updated_at = ?
+            WHERE platform = ? AND conversation_id = ? AND active = 1
+              AND monitoring_terminated = 0 AND followup_status = 'pending_review'
+              AND judgment IN ('unread', 'read_no_reply') AND followup_anchor_id = ?
+              AND (? IS NULL OR followup_text = ?)""",
+            (text, _now(), platform, conversation_id, anchor_id, expected_text, expected_text))
         self.conn.commit()
         return cursor.rowcount == 1
 
@@ -297,27 +364,34 @@ class ConversationStore:
         self.conn.commit()
 
     def claim_followup(self, platform: str, conversation_id: str,
-                       max_count: int) -> dict[str, Any] | None:
+                       max_count: int, *, text: str | None = None,
+                       anchor_id: str | None = None,
+                       expected_text: str | None = None) -> dict[str, Any] | None:
         """Reserve before touching BOSS so concurrent approvals cannot double-send."""
         self.conn.execute("BEGIN IMMEDIATE")
         try:
-            row = self.conn.execute("""SELECT followup_text, followup_anchor_id,
-                chat_url, followup_count FROM monitored_conversations
-                WHERE platform = ? AND conversation_id = ?
-                  AND active = 1 AND monitoring_terminated = 0
-                  AND followup_status = 'pending_review'
-                  AND followup_count < ?
-                  AND judgment IN ('unread', 'read_no_reply')""",
-                (platform, conversation_id, max_count)).fetchone()
+            row = self.conn.execute("""SELECT coalesce(?, c.followup_text), c.followup_anchor_id,
+                c.chat_url, c.followup_count, m.text FROM monitored_conversations c
+                JOIN monitored_messages m ON m.platform = c.platform
+                  AND m.conversation_id = c.conversation_id AND m.message_id = c.followup_anchor_id
+                WHERE c.platform = ? AND c.conversation_id = ? AND m.sender = 'self'
+                  AND c.active = 1 AND c.monitoring_terminated = 0
+                  AND c.followup_status = 'pending_review' AND c.followup_count < ?
+                  AND c.judgment IN ('unread', 'read_no_reply')
+                  AND trim(coalesce(?, c.followup_text)) != ''
+                  AND (? IS NULL OR c.followup_anchor_id = ?)
+                  AND (? IS NULL OR c.followup_text = ?)""",
+                (text, platform, conversation_id, max_count, text,
+                 anchor_id, anchor_id, expected_text, expected_text)).fetchone()
             if row is None:
                 self.conn.rollback()
                 return None
             self.conn.execute("""UPDATE monitored_conversations
-                SET followup_status = 'sending', updated_at = ?
+                SET followup_status = 'sending', followup_text = ?, updated_at = ?
                 WHERE platform = ? AND conversation_id = ?""",
-                (_now(), platform, conversation_id))
+                (row[0], _now(), platform, conversation_id))
             self.conn.commit()
-            return dict(zip(("text", "anchor_id", "chat_url", "count"), row))
+            return dict(zip(("text", "anchor_id", "chat_url", "count", "anchor_text"), row))
         except Exception:
             self.conn.rollback()
             raise
@@ -328,6 +402,15 @@ class ConversationStore:
             raise ValueError("未知追问发送结果")
         status = "idle" if outcome == "sent" else outcome
         now = _now()
+        if outcome == "sent" and message_id:
+            # A verified edited follow-up is a real message, independent of the original greeting.
+            self.conn.execute("""INSERT OR IGNORE INTO monitored_messages
+                (platform, conversation_id, message_id, sender, text, sent_at, delivery_status, biz_type)
+                SELECT platform, conversation_id, ?, 'self', followup_text, ?, '1', '1'
+                FROM monitored_conversations WHERE platform = ? AND conversation_id = ?
+                  AND followup_status = 'sending'""",
+                (message_id, str(int(datetime.now(timezone.utc).timestamp() * 1000)),
+                 platform, conversation_id))
         cursor = self.conn.execute("""UPDATE monitored_conversations
             SET followup_status = ?, followup_count = followup_count + ?,
                 judgment = CASE WHEN ? = 'sent' THEN 'unread' ELSE judgment END,

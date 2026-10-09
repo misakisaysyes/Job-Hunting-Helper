@@ -61,6 +61,64 @@ class MonitoringBackendTests(unittest.TestCase):
         rows, _ = self.store.list_conversations(limit=10, offset=0)
         self.assertEqual(rows[0]["greeting_text"], "您好，想了解岗位")
 
+    def test_list_prefers_delivered_custom_greeting_over_boss_opening_card(self) -> None:
+        jobs = JobStore(self.conn)
+        jobs.save({"source_platform": "boss", "source_job_id": "job-a"})
+        custom = "您好，快6年前端，做过金融系统和性能优化。"
+        self.conn.execute("""UPDATE collected_jobs SET greeting = ?, greeting_send_state = 'sent'
+            WHERE platform = 'boss' AND source_job_id = 'job-a'""", (custom,))
+        self.store.upsert({"platform": "boss", "conversation_id": "123",
+                           "source_job_id": "job-a", "judgment": "unread"}, [
+            {"message_id": "100", "sender": "self", "text": "Boss您好，看到贵公司的招聘信息",
+             "biz_type": "101", "delivery_status": "1"},
+            {"message_id": "101", "sender": "self", "text": custom,
+             "biz_type": "", "delivery_status": "1"},
+        ])
+        rows, _ = self.store.list_conversations(limit=10, offset=0)
+        self.assertEqual(rows[0]["greeting_text"], custom)
+        self.assertEqual(self.store.get_conversation("boss", "123")["greeting_text"], custom)
+        self.assertEqual(rows[0]["followup_status"], "none")
+
+    def test_chat_delivery_can_resolve_greeting_while_job_send_is_uncertain(self) -> None:
+        JobStore(self.conn).save({"source_platform": "boss", "source_job_id": "job-a"})
+        custom = "您好，有前端开发经验，希望投递简历。"
+        self.conn.execute("""UPDATE collected_jobs SET greeting = ?, greeting_send_state = 'unknown'
+            WHERE platform = 'boss' AND source_job_id = 'job-a'""", (custom,))
+        self.store.upsert({"platform": "boss", "conversation_id": "123",
+                           "source_job_id": "job-a", "judgment": "read_no_reply"}, [
+            {"message_id": "100", "sender": "self", "text": custom,
+             "delivery_status": "2", "biz_type": "0"},
+        ])
+        self.assertEqual(self.store.original_greeting("boss", "123", "job-a"), custom)
+        self.assertEqual(self.conn.execute("SELECT greeting_send_state FROM collected_jobs").fetchone()[0],
+                         "unknown")
+
+    def test_initial_custom_greeting_survives_default_text_in_job_record(self) -> None:
+        JobStore(self.conn).save({"source_platform": "boss", "source_job_id": "job-a"})
+        preset = "Boss您好，看到贵公司的招聘信息，希望能得到贵公司的垂青，谢谢"
+        custom = "您好，快6年前端，希望向您投递简历。"
+        self.conn.execute("""UPDATE collected_jobs SET greeting = ?, greeting_send_state = 'sent'
+            WHERE platform = 'boss' AND source_job_id = 'job-a'""", (preset,))
+        self.store.upsert({"platform": "boss", "conversation_id": "123",
+                           "source_job_id": "job-a", "judgment": "unread"}, [
+            {"message_id": "100", "sender": "self", "text": preset, "biz_type": "101",
+             "delivery_status": "1", "sent_at": "1791522968541"},
+            {"message_id": "101", "sender": "recruiter", "text": "", "biz_type": "317"},
+            {"message_id": "102", "sender": "self", "text": custom, "biz_type": "0",
+             "delivery_status": "1", "sent_at": "1791523003425"},
+        ])
+        self.assertEqual(self.store.get_conversation("boss", "123")["greeting_text"], custom)
+
+    def test_incoming_greeting_and_self_replies_are_not_an_outgoing_greeting(self) -> None:
+        self.store.upsert({"platform": "boss", "conversation_id": "123",
+                           "judgment": "read_no_reply"}, [
+            {"message_id": "100", "sender": "recruiter", "text": "您好，考虑新机会吗？",
+             "biz_type": "101", "delivery_status": "2"},
+            {"message_id": "101", "sender": "self", "text": "谢谢，暂不考虑。",
+             "delivery_status": "2", "biz_type": "0"},
+        ])
+        self.assertEqual(self.store.original_greeting("boss", "123"), "")
+
     def test_conversation_filters_apply_before_pagination(self) -> None:
         self.store.upsert({"platform": "boss", "conversation_id": "1", "job_title": "前端工程师",
                            "company": "甲公司", "judgment": "unread"}, [])
@@ -253,7 +311,7 @@ class MonitoringBackendTests(unittest.TestCase):
             rows, total = store.list_conversations(limit=10, offset=0)
             self.assertEqual((total, rows[0]["first_seen_at"]), (1, "first"))
 
-    def test_open_conversation_locates_communication_list_without_entering_chat(self) -> None:
+    def test_open_conversation_selects_target_in_communication_list(self) -> None:
         with TemporaryDirectory() as directory:
             db_path = Path(directory) / "state.sqlite3"
             with closing(sqlite3.connect(db_path)) as conn:
@@ -262,17 +320,32 @@ class MonitoringBackendTests(unittest.TestCase):
                               "judgment": "unread",
                               "chat_url": "https://www.zhipin.com/web/geek/chat?jobId=456"}, [])
             with patch("api.conversations.ChromeBrowser") as browser:
-                browser.return_value.locate_user_conversation.return_value = True
+                browser.return_value.open_user_conversation.return_value = True
                 response = open_conversation(db_path, {"browser": {"cdp_url": "cdp"}},
                                              "boss", "123")
                 self.assertIn("仅沟通", response["message"])
+                self.assertIn("打开", response["message"])
                 browser.assert_called_once_with("cdp")
-                browser.return_value.locate_user_conversation.assert_called_once_with(
-                    "123", "仅沟通")
-                browser.return_value.open_user_conversation.assert_not_called()
+                browser.return_value.open_user_conversation.assert_called_once_with(
+                    "https://www.zhipin.com/web/geek/chat", "123", "仅沟通")
+                browser.return_value.locate_user_conversation.assert_not_called()
+                browser.return_value.close.assert_called_once()
                 with self.assertRaises(JobActionError):
                     open_conversation(db_path, {"browser": {"cdp_url": "cdp"}},
                                       "boss", "missing")
+
+    def test_open_conversation_returns_error_when_target_cannot_be_verified(self) -> None:
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "state.sqlite3"
+            with closing(sqlite3.connect(db_path)) as conn:
+                ConversationStore(conn).upsert({"platform": "boss", "conversation_id": "123",
+                                               "judgment": "unread"}, [])
+            with patch("api.conversations.ChromeBrowser") as browser:
+                browser.return_value.open_user_conversation.return_value = False
+                with self.assertRaises(JobActionError) as error:
+                    open_conversation(db_path, {"browser": {"cdp_url": "cdp"}}, "boss", "123")
+                self.assertEqual(error.exception.status_code, 409)
+                browser.return_value.close.assert_called_once()
 
     def test_locator_highlights_row_without_clicking_it(self) -> None:
         adapter = object.__new__(ChromeBrowser)

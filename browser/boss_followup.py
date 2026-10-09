@@ -1,4 +1,4 @@
-"""Send a verified repeat of the original greeting in an existing BOSS chat."""
+"""Send an approved follow-up after checking its original chat and source message."""
 
 from __future__ import annotations
 
@@ -20,10 +20,11 @@ class FollowupResult:
 
 
 def send_boss_followup(cdp_url: str, conversation_id: str, anchor_id: str,
-                       text: str) -> FollowupResult:
+                       text: str, *, anchor_text: str | None = None) -> FollowupResult:
     """Recheck the exact chat and latest message before one UI send."""
     browser = ChromeBrowser(cdp_url)
     attempted = False
+    expected_anchor_text = text.strip() if anchor_text is None else anchor_text.strip()
     try:
         tab = browser.new_tab("https://www.zhipin.com/robots.txt", background=True)
         if not tab:
@@ -83,7 +84,7 @@ def send_boss_followup(cdp_url: str, conversation_id: str, anchor_id: str,
         latest = next((message for message in reversed(history) if _effective(message)), None)
         if (latest is None or latest["sender"] != "self"
                 or latest["message_id"] != anchor_id
-                or latest["text"].strip() != text.strip()
+                or latest["text"].strip() != expected_anchor_text
                 or latest["delivery_status"] not in {"1", "2"}):
             return FollowupResult(False, False, "会话最后一条消息已变化，追问未发送")
 
@@ -97,7 +98,8 @@ def send_boss_followup(cdp_url: str, conversation_id: str, anchor_id: str,
         ]) if _effective(message)), None)
         if (latest_after_open is None or latest_after_open["message_id"] != anchor_id
                 or latest_after_open["sender"] != "self"
-                or latest_after_open["text"].strip() != text.strip()):
+                or latest_after_open["text"].strip() != expected_anchor_text
+                or latest_after_open["delivery_status"] not in {"1", "2"}):
             return FollowupResult(False, False, "打开会话后发现新消息，追问未发送")
         input_box = page.locator(CHAT_INPUT).first
         input_box.wait_for(state="visible", timeout=8000)
