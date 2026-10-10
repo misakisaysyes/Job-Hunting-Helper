@@ -1,5 +1,12 @@
+import { BatchTaskMetrics, SCAN_METRIC_GROUPS } from "./MonitoringTaskMetrics";
+
 const STATUS_LABELS = {
   idle: "尚未开始", running: "监测中", completed: "监测完成", failed: "监测失败",
+};
+
+const BATCH_STATUS_LABELS = {
+  running: "执行中", completed: "已完成", completed_with_shortage: "部分完成",
+  failed: "执行失败", interrupted: "已中断", stopped: "已停止",
 };
 
 const PHASE_LABELS = {
@@ -29,34 +36,34 @@ export default function MonitoringStatus({ monitoring }) {
   const newGreetings = monitoring.phases?.new_greetings || {
     status: "pending", message: "等待扫描 BOSS「新招呼」会话",
   };
-  const pendingFilter = counts.filter_pending == null ? null : Math.max(0,
-    counts.filter_pending - (counts.filter_deleted || 0) - (counts.filter_failed || 0));
-
-  return <section className={`collection-status monitoring-status ${monitoring.status || "idle"}`} aria-label="监测任务状态">
+  return <><section className={`collection-status monitoring-status ${monitoring.status || "idle"}`} aria-label="扫描会话任务状态">
     <div className="collection-status-head">
-      <strong>本轮任务</strong>
+      <strong>扫描会话</strong>
       <span>{STATUS_LABELS[monitoring.status] || monitoring.status || STATUS_LABELS.idle}</span>
     </div>
     {monitoring.status === "failed" && <p className="monitoring-run-error" role="alert">{monitoring.message}</p>}
     <div className="monitoring-phase-grid">
-      <PhaseCard title="已沟通会话" phase={communicated}
+      <PhaseCard title="仅沟通" phase={communicated}
         settings={[
           monitoring.followup_days != null ? `最近活动 ${monitoring.followup_days} 天` : "最近活动按当前配置",
           monitoring.message_limit != null ? `每条读取 ${monitoring.message_limit} 条消息` : "消息数按当前配置",
           monitoring.followup_enabled === false ? "追问未启用" : "追问语生成后手动发送",
         ]}
-        metrics={[
-          ["待监测会话", counts.scanned], ["入库或更新", counts.saved],
-          ["未读", counts.unread], ["已读未回", counts.read_no_reply],
-          ["追问语待发送", counts.followup_pending], ["退出监测范围", counts.left_scope],
-        ]} />
-      <PhaseCard title="新招呼会话" phase={newGreetings}
+        metrics={SCAN_METRIC_GROUPS[0].fields.map(([key, label]) => [label, counts[key]])} />
+      <PhaseCard title="新会话" phase={newGreetings}
         settings={[monitoring.filter_review_required === false ? "命中排除词后自动删除" : "删除前需审核"]}
-        metrics={[
-          ["已扫描", counts.new_greetings_scanned], ["命中排除词", counts.filter_matches],
-          ["待审核删除", pendingFilter], ["已删除", counts.filter_deleted],
-          ["删除失败或未确认", counts.filter_failed], ["候选已失效", counts.filter_stale],
-        ]} />
+        metrics={SCAN_METRIC_GROUPS[1].fields.map(([key, label]) => [label, counts[key]])} />
     </div>
-  </section>;
+  </section>
+    <div className="monitoring-batch-status-grid">
+      {[["followup", "monitoring_followup", "批量追问"], ["delete", "monitoring_delete", "批量删除会话"]].map(([action, type, title]) => {
+        const state = monitoring.batches?.[action];
+        return <section className="monitoring-batch-status-card" aria-label={`${title}任务状态`} key={action}>
+          <div className="monitoring-phase-head"><h3>{title}</h3><span>{BATCH_STATUS_LABELS[state?.status] || "尚未开始"}</span></div>
+          <BatchTaskMetrics type={type} counts={state?.counts} status={state?.status} />
+          {state?.message && <p className={state.status === "failed" ? "detail-error" : ""} role="status">{state.message}</p>}
+        </section>;
+      })}
+    </div>
+  </>;
 }

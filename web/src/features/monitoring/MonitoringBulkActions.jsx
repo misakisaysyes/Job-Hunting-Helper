@@ -8,7 +8,7 @@ export default function MonitoringBulkActions({ label, count, actions, batch, on
     {batch.notice && <p role="status">{batch.notice}</p>}
     {actions.map(({ key, label: actionLabel, danger }) =>
       <button key={key} type="button" className={danger ? "bulk-danger" : ""}
-        disabled={!count || Boolean(batch.busy)} onClick={() => batch.prepare(key)}>{actionLabel}</button>)}
+        disabled={!count || batch.disabled} onClick={() => batch.prepare(key)}>{actionLabel}</button>)}
     <button type="button" disabled={Boolean(batch.busy)} onClick={onClose}>关闭批量操作</button>
   </aside>;
 }

@@ -63,7 +63,7 @@ export default function FilterCandidateList({ candidates, total, page, pageSize,
                 </button>
               </>}
               <button className="text-button" type="button" onClick={() => onOpen(candidate)}
-                disabled={Boolean(openingCandidate || batch.busy) || candidate.status === "deleted"}>
+                disabled={Boolean(openingCandidate || busy || batch.busy) || candidate.status === "deleted"}>
                 {openingCandidate === key ? "打开中…" : "查看会话"}
               </button>
               <button className="text-button filter-delete-action" type="button" disabled={Boolean(busy || batch.busy)}

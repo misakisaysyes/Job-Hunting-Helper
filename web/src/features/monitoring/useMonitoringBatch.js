@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useAlertSound } from "../../hooks/useAlertSound";
-import { executeMonitoringBatch } from "./monitoringBatch";
+import { getMonitoringBatch, startMonitoringBatch } from "../../api/monitoring";
+import { executeMonitoringBatch, executeRecordedMonitoringBatch } from "./monitoringBatch";
 
 export const monitoringKey = (item) => `${item.platform}:${item.conversation_id}`;
 
-export default function useMonitoringBatch({ items, page, filters, actions, onReload, loading }) {
+export default function useMonitoringBatch({ items, page, filters, actions, onReload, loading, onTaskChange }) {
   const [batchMode, setBatchMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState(new Set());
   const [busy, setBusy] = useState("");
@@ -67,12 +68,24 @@ export default function useMonitoringBatch({ items, page, filters, actions, onRe
     setNotice("");
     setProgress(`正在${action.label}：0/${eligible.length}`);
     try {
-      const { success, processed, failures } = await executeMonitoringBatch(eligible, action,
-        (done, total) => setProgress(`正在${action.label}：${done}/${total}`));
-      const skippedTotal = skipped + eligible.length - processed;
-      setNotice(`${action.label}完成：成功 ${success}，跳过 ${skippedTotal}，失败 ${failures.length}。${failures.slice(0, 2).join("；")}`);
-      playConfirmationAlert();
+      if (action.batchAction) {
+        const state = await executeRecordedMonitoringBatch(eligible, action, (state) => {
+          onTaskChange?.(action.batchAction, state);
+          setProgress(`${action.batchAction === "followup" ? "总追问数" : "总删除数"} ${state.counts.total} / 当前已完成数 ${state.counts.completed}`);
+        }, { start: startMonitoringBatch, read: getMonitoringBatch,
+          wait: () => new Promise((resolve) => window.setTimeout(resolve, 1000)) });
+        setNotice(`${state.message}${skipped ? `另有 ${skipped} 条不符合条件，未提交。` : ""}`);
+      } else {
+        const { success, processed, failures } = await executeMonitoringBatch(eligible, action,
+          (done, total) => setProgress(`正在${action.label}：${done}/${total}`));
+        const skippedTotal = skipped + eligible.length - processed;
+        setNotice(`${action.label}完成：成功 ${success}，跳过 ${skippedTotal}，失败 ${failures.length}。${failures.slice(0, 2).join("；")}`);
+        playConfirmationAlert();
+      }
       setSelectedKeys(new Set());
+      await onReload();
+    } catch (cause) {
+      setNotice(cause.message || "批量任务请求失败，请刷新查看任务状态。");
       await onReload();
     } finally {
       setBusy("");
@@ -81,5 +94,5 @@ export default function useMonitoringBatch({ items, page, filters, actions, onRe
   }
 
   return { batchMode, setBatchMode, selectedKeys, selectedItems, allSelected,
-    busy, progress, notice, preview, setPreview, toggle, selectAll, close, prepare, execute };
+    busy, disabled: Boolean(busy || loading), progress, notice, preview, setPreview, toggle, selectAll, close, prepare, execute };
 }

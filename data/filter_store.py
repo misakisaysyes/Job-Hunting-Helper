@@ -35,6 +35,14 @@ class FilterStore:
             ON monitored_filter_candidates(status, updated_at DESC)""")
         self.conn.commit()
 
+    def record_scan(self, greeting: dict[str, Any], matched_term: str, scan_token: str) -> bool:
+        """Count only first inserts; updating or reviving a candidate is not an insert."""
+        if not self.conn.in_transaction:
+            self.conn.execute("BEGIN IMMEDIATE")
+        existing = self.get_candidate(greeting["platform"], str(greeting["conversation_id"]))
+        self.record_match(greeting, matched_term, scan_token)
+        return existing is None
+
     def record_match(self, greeting: dict[str, Any], matched_term: str,
                      scan_token: str) -> bool:
         """Return True when a new review item was created; keep past decisions durable."""

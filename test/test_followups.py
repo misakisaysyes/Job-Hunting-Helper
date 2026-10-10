@@ -10,14 +10,14 @@ from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from ai import AIRequestError, AITaskScheduler
-from api.followups import (annotate_followup_availability, generate_followup, get_followup,
+from api.followups import (FollowupSkipped, annotate_followup_availability, generate_followup, get_followup,
                            list_conversations, proposal, proposal_with_reason, save_followup, send_followup)
 from api.jobs import JobActionError
 from api.monitoring import MonitoringRun
-from browser.boss_followup import FollowupResult
+from browser.boss_followup import FollowupResult, send_boss_followup
 from data.conversation_store import ConversationStore, resolve_original_greeting
 from data.job_store import JobStore
 from config import DEFAULT_CONFIG
@@ -269,6 +269,53 @@ class FollowupTests(unittest.TestCase):
             self.assertEqual(result["conversation"]["conversation_status"], "unread")
             with self.assertRaises(JobActionError):
                 send_followup(path, "cdp", "boss", "123")
+
+    def test_browser_missing_target_is_a_skip_before_any_send_attempt(self) -> None:
+        browser = Mock()
+        page = browser.page.return_value
+        page.locator.return_value.filter.return_value.first.get_attribute.return_value = "selected"
+        with patch("browser.boss_followup.ChromeBrowser", return_value=browser), \
+                patch("browser.boss_followup._fetch_history") as history:
+            result = send_boss_followup("cdp", "123", "100", self.greeting)
+        self.assertTrue(result.skipped)
+        self.assertFalse(result.verified)
+        self.assertFalse(result.uncertain)
+        self.assertIn("未找到目标会话", result.message)
+        history.assert_not_called()
+        page.locator.return_value.first.fill.assert_not_called()
+        browser.close.assert_called_once()
+
+    def test_missing_target_preserves_draft_without_counting_or_marking_failed(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite"
+            self.prepare_review(path)
+            message = "「仅沟通」中未找到目标会话，已跳过，未发送"
+            with patch("api.followups.send_boss_followup", return_value=FollowupResult(
+                    False, False, message, skipped=True)):
+                with self.assertRaisesRegex(FollowupSkipped, "未找到目标会话"):
+                    send_followup(path, "cdp", "boss", "123")
+            with closing(sqlite3.connect(path)) as conn:
+                saved = ConversationStore(conn).get_conversation("boss", "123")
+                self.assertEqual(saved["followup_status"], "pending_review")
+                self.assertEqual(saved["followup_count"], 0)
+                self.assertEqual(saved["followup_text"], self.greeting)
+                self.assertEqual(saved["followup_anchor_id"], "100")
+                self.assertEqual(saved["followup_last_sent_at"], "")
+                self.assertEqual(saved["followup_error"], message)
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM monitored_messages").fetchone()[0], 1)
+                self.assertIsNotNone(ConversationStore(conn).claim_followup("boss", "123", 2))
+
+    def test_other_unsent_errors_are_not_skipped_based_on_message_text(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite"
+            self.prepare_review(path)
+            with patch("api.followups.send_boss_followup", return_value=FollowupResult(
+                    False, False, "未找到目标会话页输入框")):
+                with self.assertRaises(JobActionError) as error:
+                    send_followup(path, "cdp", "boss", "123")
+            self.assertNotIsInstance(error.exception, FollowupSkipped)
+            self.assertEqual(error.exception.status_code, 502)
+            self.assertEqual(get_followup(path, "boss", "123")["conversation"]["followup_status"], "failed")
 
     def test_uncertain_send_blocks_retry_without_counting(self) -> None:
         with TemporaryDirectory() as directory:

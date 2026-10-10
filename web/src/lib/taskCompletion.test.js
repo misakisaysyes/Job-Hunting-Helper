@@ -27,3 +27,15 @@ test("detects a new task that starts and finishes between polls", () => {
     collection: run(2, "failed"), monitoring: null,
   }), true);
 });
+
+test("batch followup and deletion completions each alert once", () => {
+  const before = currentTaskRuns({ current: { monitoring_followup: run(4, "running") } });
+  const after = currentTaskRuns({ current: { monitoring_followup: run(4, "completed") } });
+  assert.equal(hasNewTaskCompletion(before, after), true);
+  assert.equal(hasNewTaskCompletion(after, after), false);
+  const deleted = currentTaskRuns({ current: {
+    monitoring_followup: run(4, "completed"), monitoring_delete: run(5, "completed_with_shortage"),
+  } });
+  assert.equal(hasNewTaskCompletion(after, deleted), true);
+  assert.equal(hasNewTaskCompletion(deleted, deleted), false);
+});

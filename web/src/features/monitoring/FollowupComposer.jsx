@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { generateFollowup, getFollowup, saveFollowup } from "../../api/monitoring";
 import { followupHint, savedFollowupText } from "./conversationDisplay";
+import { canGenerateFollowup } from "./followupGeneration";
 
 const MAX_FOLLOWUP_LENGTH = 300;
 
@@ -44,7 +45,7 @@ export default function FollowupComposer({ conversation, draft, onDraftChange, o
     <div className="detail-card-heading">
       <strong>原招呼语 / 追问语</strong>
       {canEdit && <div className="greeting-actions">
-        <button className="text-button" type="button" disabled={locked || !conversation.followup_ai_available}
+        <button className="text-button" type="button" disabled={locked || !canGenerateFollowup(conversation)}
           title={conversation.followup_ai_reason || undefined} onClick={() => {
             if (trimmed && !window.confirm("重新生成会覆盖当前追问语，确定继续吗？")) return;
             void run("generate", () => generateFollowup(conversation.platform, conversation.conversation_id, options),

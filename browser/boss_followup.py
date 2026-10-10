@@ -17,6 +17,7 @@ class FollowupResult:
     uncertain: bool
     message: str
     message_id: str = ""
+    skipped: bool = False
 
 
 def send_boss_followup(cdp_url: str, conversation_id: str, anchor_id: str,
@@ -77,7 +78,7 @@ def send_boss_followup(cdp_url: str, conversation_id: str, anchor_id: str,
             }""")
             page.wait_for_timeout(350)
         if item is None or friend is None:
-            return FollowupResult(False, False, "「仅沟通」中未找到目标会话")
+            return FollowupResult(False, False, "「仅沟通」中未找到目标会话，已跳过，未发送", skipped=True)
 
         history = [_normalise_message(raw, conversation_id)
                    for raw in _fetch_history(page, friend, 20)]

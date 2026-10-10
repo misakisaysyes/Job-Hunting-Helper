@@ -23,10 +23,12 @@ from ai.client import AIRequestError, api_concurrency
 from ai.scheduler import AITaskScheduler
 from api.collection import CollectionRun
 from api.monitoring import MonitoringRun
+from api.monitoring_batch import MonitoringBatchRun
 from api import conversations as conversation_actions
 from api import followups as followup_actions
 from api import filtering as filter_actions
 from api import jobs as job_actions
+from api import tasks as task_actions
 from api.settings import (MAX_RESUME_BYTES, SettingsError, apply_full_settings,
                           read_basic_settings, read_full_settings, save_basic_settings, save_full_settings,
                           save_resume_upload)
@@ -50,6 +52,7 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
     static_root = (ROOT / "web" / "dist").resolve()
     collection = CollectionRun(db_path, scheduler)
     monitoring = MonitoringRun(db_path)
+    monitoring_batches = MonitoringBatchRun(db_path)
     task_runs = TaskRunStore(db_path)
     lifecycle_lock = Lock()
 
@@ -57,7 +60,7 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
         def log_message(self, format: str, *args: object) -> None:
             if self.command == "GET" and urlsplit(self.path).path in {
                 "/api/collections/current", "/api/monitoring/current",
-                "/api/conversations", "/api/tasks/today",
+                "/api/conversations", "/api/tasks/today", "/api/tasks/history",
             }:
                 return
             super().log_message(format, *args)
@@ -130,19 +133,33 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                 summary["current"] = {
                     "collection": collection.snapshot(),
                     "monitoring": monitoring.snapshot(),
+                    "monitoring_followup": task_runs.latest("monitoring_followup"),
+                    "monitoring_delete": task_runs.latest("monitoring_delete"),
                 }
                 summary["active"] = {
-                    "collection": summary["current"]["collection"]["status"] == "running",
-                    "monitoring": summary["current"]["monitoring"]["status"] == "running",
+                    key: bool(state and state["status"] == "running")
+                    for key, state in summary["current"].items()
                 }
                 summary["active"]["any"] = any(summary["active"].values())
                 self.send_json(200, summary)
+                return
+            if request.path == "/api/tasks/history":
+                query = parse_qs(request.query)
+                self.action_result(lambda: task_actions.get_task_history(
+                    task_runs, query.get("date", [""])[0]))
                 return
             if request.path == "/api/collections/current":
                 self.send_json(200, collection.snapshot())
                 return
             if request.path == "/api/monitoring/current":
-                self.send_json(200, monitoring.snapshot())
+                self.send_json(200, {**monitoring.snapshot(), "batches": monitoring_batches.snapshots()})
+                return
+            if request.path.startswith("/api/monitoring/batches/"):
+                run_id = request.path.removeprefix("/api/monitoring/batches/")
+                if not run_id.isdigit():
+                    self.send_json(400, {"error": "批量任务 ID 须为整数"})
+                    return
+                self.action_result(lambda: monitoring_batches.get(int(run_id)))
                 return
             if request.path == "/api/conversations":
                 query = parse_qs(request.query)
@@ -275,8 +292,7 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                         restarting = requires_service_restart(
                             saved, started_ai_concurrency, db_path,
                             state_db_overridden=state_db_overridden)
-                        if restarting and (collection.snapshot()["status"] == "running"
-                                           or monitoring.snapshot()["status"] == "running"):
+                        if restarting and task_runs.active_task_type():
                             self.send_json(409, {"error": "采集或监测任务正在运行，请任务结束后再生效需要重启的配置"})
                             return
                         result = apply_full_settings()
@@ -299,6 +315,7 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                 return
             if restart_event.is_set():
                 self.send_json(503, {"error": "服务正在重启，请稍后重试"})
+                return
             if path == "/api/settings/resume":
                 if self.headers.get("Content-Type", "").split(";", 1)[0].strip() != "text/markdown":
                     self.send_json(415, {"error": "请上传 .md 格式的简历"})
@@ -359,6 +376,22 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                     self.send_json(409, {"error": "已有监测任务正在运行，请等待任务完成后再启动"})
                     return
                 self.send_json(202, state)
+                return
+            if path == "/api/monitoring/batches":
+                body = self.read_json()
+                if body is None:
+                    return
+                try:
+                    with lifecycle_lock:
+                        if restart_event.is_set():
+                            raise job_actions.JobActionError("服务正在重启，请稍后重试", 503)
+                        state = monitoring_batches.start(body.get("action"), body.get("items"))
+                except TaskAlreadyRunning as exc:
+                    self.send_json(409, {"error": str(exc)})
+                except job_actions.JobActionError as exc:
+                    self.send_json(exc.status_code, {"error": str(exc)})
+                else:
+                    self.send_json(202, state)
                 return
             parts = path.split("/")
             if (len(parts) == 7 and parts[:3] == ["", "api", "filter-candidates"]

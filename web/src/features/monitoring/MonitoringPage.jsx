@@ -1,13 +1,18 @@
 import { useEffect, useState } from "react";
-import { confirmFilterDelete, deleteConversationRecord, deleteFilterRecord, getCurrentMonitoring, listConversations, listFilterCandidates, openConversation, openFilterCandidate, sendFollowup, startMonitoring, terminateMonitoring } from "../../api/monitoring";
+import { confirmFilterDelete, deleteConversationRecord, deleteFilterRecord, generateFollowup, getCurrentMonitoring, listConversations, listFilterCandidates, openConversation, openFilterCandidate, sendFollowup, startMonitoring, terminateMonitoring } from "../../api/monitoring";
 import ConversationList from "./ConversationList";
 import ConversationDetails from "./ConversationDetails";
 import { savedFollowupText } from "./conversationDisplay";
 import FilterCandidateList from "./FilterCandidateList";
 import MonitoringStatus from "./MonitoringStatus";
 import useMonitoringBatch from "./useMonitoringBatch";
+import { createFollowupGenerationAction } from "./followupGeneration";
 
 const PAGE_SIZE = 20;
+
+function hasRunningMonitoring(state) {
+  return state.status === "running" || Object.values(state.batches || {}).some((batch) => batch?.status === "running");
+}
 
 export default function MonitoringPage() {
   const [monitoring, setMonitoring] = useState({ status: "idle", message: "", counts: {} });
@@ -45,6 +50,11 @@ export default function MonitoringPage() {
   const [busyFilterRecordDelete, setBusyFilterRecordDelete] = useState("");
   const [filterNotice, setFilterNotice] = useState(null);
   const [openingFilterCandidate, setOpeningFilterCandidate] = useState("");
+  const monitoringBusy = hasRunningMonitoring(monitoring);
+
+  function updateBatchTask(action, state) {
+    setMonitoring((previous) => ({ ...previous, batches: { ...previous.batches, [action]: state } }));
+  }
 
   function followupText(conversation) {
     const draft = followupDrafts[`${conversation.platform}:${conversation.conversation_id}`];
@@ -65,11 +75,16 @@ export default function MonitoringPage() {
     items: conversations.map((item) => ({ ...item, saved_followup_text: item.followup_text,
       followup_text: followupText(item) })), page,
     filters: `${conversationQuery}\u0000${conversationStatus}\u0000${followupStatus}`,
-    loading: listLoading || Boolean(busyFollowup || busyTerminate || busyConversationDelete || openingConversation),
+    loading: listLoading || monitoringBusy || Boolean(busyFollowup || busyTerminate || busyConversationDelete || openingConversation),
+    onTaskChange: updateBatchTask,
     onReload: () => setListVersion((version) => version + 1),
     actions: {
+      generate: createFollowupGenerationAction(generateFollowup, updateFollowup),
       followup: {
         label: "追问", preview: true, stopOnFailure: true,
+        batchAction: "followup",
+        toBatchItem: (item) => ({ platform: item.platform, conversation_id: item.conversation_id,
+          text: item.followup_text, anchor_id: item.followup_anchor_id, expected_text: item.saved_followup_text }),
         eligible: (item) => Boolean(item.followup_eligible && item.followup_text.trim()
           && item.followup_text.trim().length <= 300),
         perform: (item) => sendFollowup(item.platform, item.conversation_id,
@@ -91,11 +106,15 @@ export default function MonitoringPage() {
   const filterBatch = useMonitoringBatch({
     items: filterCandidates, page: filterPage,
     filters: `${filterQuery}\u0000${filterStatus}`,
-    loading: filterLoading || Boolean(busyFilter || busyFilterRecordDelete || openingFilterCandidate),
+    loading: filterLoading || monitoringBusy || Boolean(busyFilter || busyFilterRecordDelete || openingFilterCandidate),
+    onTaskChange: updateBatchTask,
     onReload: () => setListVersion((version) => version + 1),
     actions: {
       filter: {
         label: "删除会话", stopOnFailure: true,
+        batchAction: "delete",
+        toBatchItem: (item) => ({ platform: item.platform, conversation_id: item.conversation_id,
+          confirm_still_present: item.status === "unknown" }),
         eligible: (item) => ["pending_review", "failed", "unknown"].includes(item.status),
         confirm: (count, skipped) => `确定从 BOSS「新招呼」删除所选 ${count} 条会话吗？系统会重新核对目标；删除结果不明的记录将再次尝试。${skipped ? `另有 ${skipped} 条不可删除的候选将跳过。` : ""}`,
         perform: (item) => confirmFilterDelete(item.platform, item.conversation_id,
@@ -183,7 +202,7 @@ export default function MonitoringPage() {
   }, [conversations]);
 
   useEffect(() => {
-    if (monitoring.status !== "running") return;
+    if (!monitoringBusy) return;
     let active = true;
     let timer;
     async function poll() {
@@ -192,7 +211,7 @@ export default function MonitoringPage() {
         if (!active) return;
         setMonitoring(state);
         setTaskError("");
-        if (state.status !== "running") {
+        if (!hasRunningMonitoring(state)) {
           setPage(0);
           setFilterPage(0);
           setListVersion((version) => version + 1);
@@ -205,14 +224,14 @@ export default function MonitoringPage() {
     }
     timer = window.setTimeout(poll, 2000);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [monitoring.status]);
+  }, [monitoringBusy]);
 
   async function start() {
     setStarting(true);
     setTaskError("");
     try {
       const state = await startMonitoring();
-      setMonitoring(state);
+      setMonitoring((previous) => ({ ...previous, ...state }));
       if (state.status !== "running") {
         setPage(0);
         setFilterPage(0);
@@ -359,8 +378,8 @@ export default function MonitoringPage() {
           <p className="subtitle">监测「仅沟通」中未读、已读未回的会话，并从「新招呼」筛出命中公司排除词的会话。</p>
         </div>
         <button className="start-button" type="button" onClick={start}
-          disabled={!statusReady || starting || monitoring.status === "running"}>
-          {!statusReady ? "准备中…" : starting ? "启动中…" : monitoring.status === "running" ? "正在监测…" : "开始监测"}
+          disabled={!statusReady || starting || monitoringBusy}>
+          {!statusReady ? "准备中…" : starting ? "启动中…" : monitoringBusy ? "监测任务执行中…" : "扫描会话"}
         </button>
       </div>
 
@@ -404,10 +423,10 @@ export default function MonitoringPage() {
           onChange={updateFollowup} onSend={handleFollowup} onOpen={openChat}
           openingConversation={openingConversation}
           onTerminate={handleTerminate} terminatingConversation={busyTerminate}
-          disabled={Boolean(busyFollowup || busyTerminate || busyConversationDelete || conversationBatch.busy || filterBatch.busy)}
+          disabled={monitoringBusy || Boolean(busyFollowup || busyTerminate || busyConversationDelete || conversationBatch.busy || filterBatch.busy)}
           onBusyChange={(action) => setBusyFollowup(action
             ? `${conversation.platform}:${conversation.conversation_id}` : "")} />}
-        onDelete={handleConversationDelete} busyAction={busyFollowup || busyTerminate || busyConversationDelete || filterBatch.busy}
+        onDelete={handleConversationDelete} busyAction={monitoringBusy || busyFollowup || busyTerminate || busyConversationDelete || filterBatch.busy}
         busyDelete={busyConversationDelete}
         batch={conversationBatch} onBatchModeChange={(enabled) => {
           if (filterBatch.busy) return;
@@ -462,7 +481,7 @@ export default function MonitoringPage() {
         pageSize={PAGE_SIZE} loading={filterLoading} onPage={setFilterPage}
         onRefresh={() => setFilterRefreshVersion((version) => version + 1)}
         onAction={handleFilter} onOpen={openFilteredChat} onDelete={handleFilterRecordDelete}
-        openingCandidate={openingFilterCandidate} busy={busyFilter || busyFilterRecordDelete || conversationBatch.busy}
+        openingCandidate={openingFilterCandidate} busy={monitoringBusy || busyFilter || busyFilterRecordDelete || conversationBatch.busy}
         busyDelete={busyFilterRecordDelete}
         batch={filterBatch} onBatchModeChange={(enabled) => {
           if (conversationBatch.busy) return;

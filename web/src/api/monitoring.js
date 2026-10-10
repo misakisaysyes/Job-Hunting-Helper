@@ -8,6 +8,14 @@ export function startMonitoring() {
   return requestJson("/api/monitoring", jsonOptions("POST"));
 }
 
+export function startMonitoringBatch(action, items) {
+  return requestJson("/api/monitoring/batches", jsonOptions("POST", { action, items }));
+}
+
+export function getMonitoringBatch(runId) {
+  return requestJson(`/api/monitoring/batches/${encodeURIComponent(runId)}`);
+}
+
 export function listConversations(limit, offset, filters = {}) {
   const params = new URLSearchParams({ limit, offset });
   for (const [key, value] of Object.entries(filters)) {

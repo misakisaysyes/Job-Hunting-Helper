@@ -20,6 +20,13 @@ from data.job_store import JobStore
 from message import MAX_GREETING_LENGTH, make_greeting_task
 
 
+class FollowupSkipped(JobActionError):
+    """The target could not be located and no message was sent."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, 409)
+
+
 def _message_time(value: object) -> datetime | None:
     try:
         stamp = float(str(value))
@@ -262,13 +269,16 @@ def send_followup(db_path: Path, cdp_url: str, platform: str,
         raise JobActionError("追问发送结果不明，请人工核查", 409) from exc
     with closing(sqlite3.connect(db_path, timeout=10)) as conn:
         store = ConversationStore(conn)
-        outcome = "sent" if result.verified else "unknown" if result.uncertain else "failed"
+        outcome = ("sent" if result.verified else "unknown" if result.uncertain
+                   else "skipped" if result.skipped else "failed")
         if not store.finish_followup(platform, conversation_id, outcome=outcome,
                                      message_id=result.message_id, note=result.message):
             raise JobActionError("追问结果未能写入，请人工核查", 500)
         conversation = store.get_conversation(platform, conversation_id)
         if conversation is not None:
             annotate_followup_availability(conn, [conversation], MONITORING_CONFIG)
+    if outcome == "skipped":
+        raise FollowupSkipped(result.message)
     if not result.verified:
         raise JobActionError(result.message, 409 if result.uncertain else 502)
     return {"conversation": conversation, "message": result.message}

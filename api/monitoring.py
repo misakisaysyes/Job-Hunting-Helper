@@ -32,6 +32,15 @@ def _initial_phases() -> dict[str, dict[str, str]]:
     }
 
 
+def _initial_counts() -> dict[str, int]:
+    return dict.fromkeys((
+        "scanned", "saved", "communicated_new", "left_scope", "in_job_pool", "outside_job_pool",
+        "unread", "read_no_reply", "followup_pending", "followup_sent", "followup_failed",
+        "new_greetings_scanned", "filter_matches", "filter_pending", "filter_new",
+        "filter_deleted", "filter_failed", "filter_stale",
+    ), 0)
+
+
 class MonitoringRun:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
@@ -39,7 +48,7 @@ class MonitoringRun:
         self.lock = Lock()
         self.status = "idle"
         self.message = "尚未开始"
-        self.counts: dict[str, int] = {}
+        self.counts = _initial_counts()
         self.phases = _initial_phases()
         self._active_phase: str | None = None
         self.started_at: str | None = None
@@ -80,10 +89,10 @@ class MonitoringRun:
                     raise ValueError(f"monitoring.{key} 须为正整数")
             started_at = _now()
             message = "正在连接 Chrome 并读取最近会话…"
-            run_id = self.run_store.start("monitoring", started_at, message)
+            run_id = self.run_store.start("monitoring", started_at, message, counts=_initial_counts())
             self.status = "running"
             self.message = message
-            self.counts = {}
+            self.counts = _initial_counts()
             self.phases = _initial_phases()
             self._active_phase = None
             self.started_at = started_at
@@ -109,14 +118,20 @@ class MonitoringRun:
             self.message = message
             if counts is not None:
                 self.counts = counts.copy()
+            run_id = self.run_id
+        if run_id is not None and counts is not None:
+            self.run_store.update_counts(run_id, counts, message=message)
 
     def _execute(self, config: dict | None = None, run_id: int | None = None,
                  blocked_terms: list[str] | None = None) -> None:
+        counts = _initial_counts()
         try:
             with self.lock:
                 self.phases = _initial_phases()
-                self.counts = {}
-            self._phase_progress("communicated", "scanning", "正在扫描「仅沟通」会话列表…")
+                self.counts = counts.copy()
+                if run_id is not None:
+                    self.run_id = run_id
+            self._phase_progress("communicated", "scanning", "正在扫描「仅沟通」会话列表…", counts)
             if config is None:
                 config = deepcopy(MONITORING_CONFIG)
             if blocked_terms is None:
@@ -130,18 +145,13 @@ class MonitoringRun:
                 skip_conversation_ids=skip_conversation_ids,
                 on_progress=self._progress,
             )
+            counts["scanned"] = len(conversations)
             self._phase_progress("communicated", "processing",
-                                 f"已读取 {len(conversations)} 条待监测会话，等待入库")
+                                 f"已读取 {len(conversations)} 条待监测会话，等待入库", counts)
             self._phase_progress("new_greetings", "scanning", "正在扫描「新招呼」会话列表…")
             new_greetings = scan_new_greetings(
                 DEFAULT_CONFIG["browser"]["cdp_url"], on_progress=self._progress)
-            counts = {"scanned": len(conversations), "saved": 0, "left_scope": 0,
-                      "in_job_pool": 0, "outside_job_pool": 0,
-                      "unread": 0, "read_no_reply": 0,
-                      "followup_pending": 0, "followup_sent": 0,
-                      "followup_failed": 0, "new_greetings_scanned": len(new_greetings),
-                      "filter_matches": 0, "filter_pending": 0,
-                      "filter_deleted": 0, "filter_failed": 0, "filter_stale": 0}
+            counts["new_greetings_scanned"] = len(new_greetings)
             self._phase_progress("new_greetings", "processing",
                                  f"已扫描 {len(new_greetings)} 条新招呼，等待匹配排除词", counts)
             auto_delete: list[str] = []
@@ -160,12 +170,14 @@ class MonitoringRun:
                     if job is not None:
                         conversation["job_title"] = conversation["job_title"] or job.get("title", "")
                         conversation["company"] = job.get("company") or conversation["company"]
-                    if not conversations_store.upsert(conversation, conversation["messages"],
-                                                      scan_token=scan_token):
+                    saved_row, inserted = conversations_store.save_scan(
+                        conversation, conversation["messages"], scan_token=scan_token)
+                    if not saved_row:
                         self._phase_progress("communicated", "processing",
                                              f"正在处理已沟通会话 {index}/{len(conversations)}", counts)
                         continue
                     counts["saved"] += 1
+                    counts["communicated_new"] += int(inserted)
                     saved = conversations_store.get_conversation("boss", conversation["conversation_id"])
                     if saved is None:
                         # The user may terminate this conversation while the scan runs.
@@ -210,7 +222,7 @@ class MonitoringRun:
                                              f"正在匹配新招呼 {index}/{len(new_greetings)}", counts)
                         continue
                     counts["filter_matches"] += 1
-                    filters.record_match(greeting, term, filter_scan_token)
+                    counts["filter_new"] += int(filters.record_scan(greeting, term, filter_scan_token))
                     candidate = filters.get_candidate("boss", greeting["conversation_id"])
                     if candidate["status"] == "pending_review":
                         counts["filter_pending"] += 1

@@ -2,6 +2,7 @@
 
 import sqlite3
 import unittest
+from copy import deepcopy
 from unittest.mock import MagicMock, patch
 from contextlib import closing
 
@@ -13,6 +14,7 @@ from api.monitoring import MonitoringRun
 from data.conversation_store import ConversationStore
 from data.filter_store import FilterStore
 from data.job_store import JobStore
+from config import MONITORING_CONFIG
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -274,6 +276,47 @@ class MonitoringBackendTests(unittest.TestCase):
             self.assertEqual(state["phases"]["communicated"]["status"], "completed")
             self.assertEqual(state["phases"]["new_greetings"]["status"], "completed")
             self.assertEqual(state["counts"]["new_greetings_scanned"], 0)
+
+    def test_scan_counts_only_first_inserts_and_persists_updates_separately(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite"
+            run = MonitoringRun(path)
+            config = deepcopy(MONITORING_CONFIG)
+            config.update(followup_enabled=False, filter_review_required=True)
+            conversations = [{
+                "platform": "boss", "conversation_id": str(i), "source_job_id": "",
+                "job_title": "前端", "company": "测试公司", "judgment": judgment, "messages": [],
+            } for i, judgment in ((1, "unread"), (2, "read_no_reply"))]
+            greetings = [{"platform": "boss", "conversation_id": "3", "company": "屏蔽公司"},
+                         {"platform": "boss", "conversation_id": "4", "company": "普通公司"}]
+            with patch("api.monitoring.scan_recent_conversations", side_effect=lambda *args, **kwargs: deepcopy(conversations)), \
+                    patch("api.monitoring.scan_new_greetings", return_value=greetings):
+                for index, new_count in ((1, 2), (2, 0)):
+                    run_id = run.run_store.start("monitoring", f"2026-10-10T00:0{index}:00+00:00", "扫描中")
+                    run._execute(config, run_id, ["屏蔽"])
+                    counts = run.run_store.get_run(run_id)["counts"]
+                    self.assertEqual(counts["scanned"], 2)
+                    self.assertEqual(counts["saved"], 2)
+                    self.assertEqual(counts["communicated_new"], new_count)
+                    self.assertEqual((counts["unread"], counts["read_no_reply"]), (1, 1))
+                    self.assertEqual(counts["new_greetings_scanned"], 2)
+                    self.assertEqual(counts["filter_new"], 1 if index == 1 else 0)
+                # Restoring an existing candidate is an update, not a new database insert.
+                with closing(sqlite3.connect(path)) as conn:
+                    FilterStore(conn).retire_unseen("different-scan")
+                run._execute(config, blocked_terms=["屏蔽"])
+                self.assertEqual(run.snapshot()["counts"]["filter_new"], 0)
+
+    def test_failed_second_scan_preserves_completed_first_scan_count(self) -> None:
+        with TemporaryDirectory() as directory:
+            run = MonitoringRun(Path(directory) / "state.sqlite")
+            run_id = run.run_store.start("monitoring", "2026-10-10T00:01:00+00:00", "扫描中")
+            with patch("api.monitoring.scan_recent_conversations", return_value=[{}] * 3), \
+                    patch("api.monitoring.scan_new_greetings", side_effect=RuntimeError("列表读取失败")):
+                run._execute(run_id=run_id)
+            state = run.run_store.get_run(run_id)
+            self.assertEqual(state["status"], "failed")
+            self.assertEqual((state["counts"]["scanned"], state["counts"]["communicated_new"]), (3, 0))
 
     def test_monitoring_marks_the_failed_scan_stage(self) -> None:
         with TemporaryDirectory() as directory:

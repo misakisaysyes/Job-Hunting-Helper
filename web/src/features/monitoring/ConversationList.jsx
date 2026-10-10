@@ -94,7 +94,7 @@ export default function ConversationList({ conversations, total, page, pageSize,
           <button type="button" onClick={() => onPage(page + 1)} disabled={loading || Boolean(batch.busy) || end >= total}>下一页</button></div>
       </div>
       {batch.batchMode && <MonitoringBulkActions label="会话" count={batch.selectedItems.length} batch={batch}
-        actions={[{ key: "followup", label: "批量追问" }, { key: "terminate", label: "批量终止会话" },
+        actions={[{ key: "generate", label: "批量生成追问语" }, { key: "followup", label: "批量追问" }, { key: "terminate", label: "批量终止会话" },
           { key: "delete", label: "批量删除", danger: true }]} onClose={batch.close} />}
     </section>
   );

@@ -33,6 +33,35 @@
   font-size: 13px;
 }
 
+.workbench-history {
+  padding-top: 26px;
+  border-top: 1px solid #e6eaf0;
+}
+
+.workbench-history-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px 20px;
+  margin-bottom: 16px;
+}
+
+.workbench-history-heading .workbench-section-heading { margin-bottom: 0; }
+.workbench-history-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.workbench-history-controls label { display: flex; align-items: center; gap: 8px; color: #748398; font-size: 12px; }
+.workbench-history-controls input {
+  min-height: 36px;
+  padding: 6px 10px;
+  border: 1px solid #dce5ef;
+  border-radius: 8px;
+  background: #fff;
+  color: #34465c;
+  font: inherit;
+}
+.workbench-history-controls input:focus { outline: 2px solid #b8d8f4; border-color: #77abe0; }
+
+
 .workbench-journey {
   margin-bottom: 30px;
   padding: 28px 30px 22px;
@@ -115,6 +144,7 @@
 .workbench-run-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: 18px;
 }
 
@@ -182,6 +212,19 @@
   color: #42546b;
   font-size: 12px;
 }
+
+.workbench-monitoring-task + .workbench-monitoring-task { margin-top: 12px; }
+.workbench-monitoring-task .workbench-run-history-head { margin-bottom: 12px; }
+.monitoring-task-metric-groups {
+  display: grid;
+  gap: 10px;
+  padding-bottom: 15px;
+}
+.monitoring-task-metric-groups > div { display: flex; align-items: baseline; min-width: 0; gap: 10px; overflow-x: auto; white-space: nowrap; }
+.monitoring-task-metric-groups h5 { flex: 0 0 auto; margin: 0; color: #64758a; font-size: 12px; font-weight: 600; }
+.monitoring-task-metric-groups .workbench-run-metrics { flex: 0 0 auto; flex-wrap: nowrap; gap: 12px; padding-bottom: 0; }
+.workbench-task-records summary { padding: 8px 0; color: #2176cf; font-size: 12px; cursor: pointer; }
+.workbench-task-records .workbench-run-history { margin-top: 4px; }
 
 .workbench-run-history-head,
 .workbench-run-entry-head {

@@ -1,7 +1,7 @@
 from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import json
 from pathlib import Path
 import sqlite3
@@ -12,7 +12,9 @@ import unittest
 from unittest.mock import patch
 
 from api.collection import CollectionRun
+from api.jobs import JobActionError
 from api.server import requires_service_restart
+from api.tasks import get_task_history
 from api.settings import (SettingsError, apply_full_settings, read_full_settings, save_full_settings,
                           save_resume_upload)
 from config import DEFAULT_CONFIG, MONITORING_CONFIG
@@ -107,6 +109,74 @@ class FullSettingsTests(unittest.TestCase):
 
 
 class TaskRunStoreTests(unittest.TestCase):
+    def test_legacy_scans_do_not_create_incomplete_daily_new_counts(self):
+        with TemporaryDirectory() as temp:
+            store = TaskRunStore(Path(temp) / "tasks.sqlite3")
+            legacy = store.start("monitoring", "2026-10-10T00:00:00+00:00", "旧扫描")
+            store.finish(legacy, "completed", "旧扫描完成", {"scanned": 3, "saved": 2},
+                "2026-10-10T00:01:00+00:00")
+            current = store.start("monitoring", "2026-10-10T00:02:00+00:00", "新扫描")
+            store.finish(current, "completed", "新扫描完成",
+                {"scanned": 4, "communicated_new": 1, "filter_new": 2}, "2026-10-10T00:03:00+00:00")
+            summary = store.for_date(date(2026, 10, 10))["monitoring"]
+            self.assertEqual(summary["totals"]["scanned"], 7)
+            self.assertIsNone(summary["totals"]["communicated_new"])
+            self.assertIsNone(summary["totals"]["filter_new"])
+            self.assertEqual(summary["history"][0]["counts"]["communicated_new"], 1)
+
+    def test_historical_day_totals_use_shanghai_boundaries_and_start_date(self):
+        with TemporaryDirectory() as temp:
+            path = Path(temp) / "tasks.sqlite3"
+            store = TaskRunStore(path)
+            for task_type, started, finished, counts in (
+                    ("collection", "2026-10-08T15:59:59+00:00", "2026-10-08T16:00:01+00:00", {"new": 99}),
+                    ("collection", "2026-10-08T16:00:00+00:00", "2026-10-08T16:01:00+00:00", {"seen": 3, "new": 2}),
+                    ("monitoring", "2026-10-09T01:00:00+00:00", "2026-10-09T01:01:00+00:00", {"scanned": 5, "saved": 4}),
+                    ("collection", "2026-10-09T15:59:59+00:00", "2026-10-09T16:05:00+00:00", {"seen": 4, "new": 1}),
+                    ("monitoring", "2026-10-09T16:06:00+00:00", "2026-10-09T16:07:00+00:00", {"scanned": 99})):
+                run = store.start(task_type, started, "任务开始")
+                store.finish(run, "completed", "任务完成", counts, finished)
+            with closing(sqlite3.connect(path)) as conn, conn:
+                conn.execute("CREATE TABLE greeting_send_events (sent_at TEXT NOT NULL)")
+                conn.executemany("INSERT INTO greeting_send_events (sent_at) VALUES (?)", [
+                    ("2026-10-08T15:59:59+00:00",), ("2026-10-08T16:00:00+00:00",),
+                    ("2026-10-09T15:59:59+00:00",), ("2026-10-09T16:00:00+00:00",),
+                ])
+            summary = store.for_date(date(2026, 10, 9))
+            self.assertEqual(summary["date"], "2026-10-09")
+            self.assertEqual(summary["timezone"], "Asia/Shanghai")
+            self.assertEqual(summary["collection"]["runs"], 2)
+            self.assertEqual(summary["collection"]["totals"], {"seen": 7, "new": 3, "greeted": 2})
+            self.assertEqual(summary["monitoring"]["totals"],
+                             {"scanned": 5, "saved": 4, "communicated_new": None, "filter_new": None})
+            self.assertEqual(summary["collection"]["history"][0]["started_at"], "2026-10-09T15:59:59+00:00")
+            self.assertEqual(summary["collection"]["history"][0]["finished_at"], "2026-10-09T16:05:00+00:00")
+
+    def test_history_defaults_to_yesterday_and_reads_a_selected_or_empty_day(self):
+        with TemporaryDirectory() as temp:
+            store = TaskRunStore(Path(temp) / "tasks.sqlite3")
+            run = store.start("collection", "2026-10-08T16:01:00+00:00", "采集中")
+            store.finish(run, "completed", "完成", {"new": 2}, "2026-10-08T16:02:00+00:00")
+            now = datetime(2026, 10, 9, 16, 2, tzinfo=timezone.utc)
+            summary = get_task_history(store, now=now)
+            self.assertEqual(summary["date"], "2026-10-09")
+            self.assertEqual(summary["latest_date"], "2026-10-09")
+            self.assertEqual(summary["collection"]["runs"], 1)
+            empty = get_task_history(store, "2026-10-08", now=now)
+            self.assertEqual(empty["collection"], {"runs": 0, "totals": {"greeted": 0}, "history": []})
+            self.assertEqual(empty["monitoring"], {"runs": 0, "totals": {}, "history": []})
+            self.assertEqual({key: value for key, value in summary.items() if key != "latest_date"},
+                store.today(now=datetime(2026, 10, 9, 2, tzinfo=timezone.utc)))
+
+    def test_history_rejects_invalid_dates_today_and_future_dates(self):
+        with TemporaryDirectory() as temp:
+            store = TaskRunStore(Path(temp) / "tasks.sqlite3")
+            now = datetime(2026, 10, 9, 16, 2, tzinfo=timezone.utc)
+            for value in ("invalid", "20261009", "2026-02-30", "2026-10-32", "2026-10-10", "2026-10-11"):
+                with self.subTest(value=value), self.assertRaises(JobActionError) as context:
+                    get_task_history(store, value, now=now)
+                self.assertEqual(context.exception.status_code, 400)
+
     def test_collection_and_monitoring_share_one_running_slot(self):
         with TemporaryDirectory() as temp:
             path = Path(temp) / "tasks.sqlite3"

@@ -135,6 +135,17 @@ class ConversationStore:
             ON monitored_conversations(active, updated_at DESC)""")
         self.conn.commit()
 
+    def save_scan(self, conversation: dict[str, Any], messages: list[dict[str, Any]],
+                  *, scan_token: str = "") -> tuple[bool, bool]:
+        """Return whether the scan saved this row and whether it was newly inserted."""
+        if not self.conn.in_transaction:
+            self.conn.execute("BEGIN IMMEDIATE")
+        existing = self.conn.execute("""SELECT 1 FROM monitored_conversations
+            WHERE platform = ? AND conversation_id = ?""",
+            (conversation["platform"], str(conversation["conversation_id"]))).fetchone()
+        saved = self.upsert(conversation, messages, scan_token=scan_token)
+        return saved, bool(saved and existing is None)
+
     def upsert(self, conversation: dict[str, Any], messages: list[dict[str, Any]],
                *, scan_token: str = "") -> bool:
         """Save a conversation whose outbound message is unread or read without reply."""
@@ -398,9 +409,10 @@ class ConversationStore:
 
     def finish_followup(self, platform: str, conversation_id: str, *, outcome: str,
                         message_id: str = "", note: str = "") -> bool:
-        if outcome not in {"sent", "failed", "unknown"}:
+        if outcome not in {"sent", "failed", "unknown", "skipped"}:
             raise ValueError("未知追问发送结果")
-        status = "idle" if outcome == "sent" else outcome
+        # A missing target was never sent to; retain its draft for a later retry.
+        status = {"sent": "idle", "skipped": "pending_review"}.get(outcome, outcome)
         now = _now()
         if outcome == "sent" and message_id:
             # A verified edited follow-up is a real message, independent of the original greeting.

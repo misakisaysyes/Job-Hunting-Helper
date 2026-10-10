@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getTodayTasks } from "../../api/tasks";
 import TaskRunOverview from "./TaskRunOverview";
+import TaskRunHistory from "./TaskRunHistory";
 import "./workbench.css";
 
 export default function WorkbenchHome({ onOpenCollection, onOpenMonitoring }) {
@@ -31,9 +32,10 @@ export default function WorkbenchHome({ onOpenCollection, onOpenMonitoring }) {
     <header className="workbench-intro">
       <p className="eyebrow">WORKBENCH</p>
       <h1>工作台</h1>
-      <p>查看今天执行过的采集与监测任务，以及当前进度。</p>
+      <p>查看每天的采集与监测结果、执行记录及当前进度。</p>
     </header>
     <TaskRunOverview data={today} error={error}
       onOpenCollection={onOpenCollection} onOpenMonitoring={onOpenMonitoring} />
+    <TaskRunHistory />
   </main>;
 }
