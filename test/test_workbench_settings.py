@@ -5,7 +5,8 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from api.settings import SettingsError, read_basic_settings, save_basic_settings
+from api.settings import (SettingsError, apply_full_settings, read_basic_settings,
+                          save_basic_settings, save_full_settings)
 from config import DEFAULT_CONFIG, MONITORING_CONFIG
 
 
@@ -45,6 +46,24 @@ class WorkbenchSettingsTests(unittest.TestCase):
                                                 "encrypt_expect_id": []}})
         self.assertFalse(self.path.exists())
         self.assertEqual(DEFAULT_CONFIG["collection"], self.saved_default["collection"])
+
+    def test_basic_settings_disabling_scoring_preserves_greeting_switch(self):
+        DEFAULT_CONFIG["ai"].update(use_ai_score=True, use_ai_greeting=True)
+        result = save_basic_settings({"ai": {"use_ai_score": False}})
+        self.assertFalse(result["settings"]["ai"]["use_ai_score"])
+        self.assertTrue(result["settings"]["ai"]["use_ai_greeting"])
+        self.assertEqual(json.loads(self.path.read_text())["ai"], {"use_ai_score": False})
+
+    def test_full_settings_can_save_and_apply_greeting_only(self):
+        DEFAULT_CONFIG["ai"].update(use_ai_score=True, use_ai_greeting=False)
+        result = save_full_settings({"ai": {"use_ai_score": False, "use_ai_greeting": True}})
+        self.assertTrue(result["pending_apply"])
+        self.assertFalse(result["settings"]["ai"]["use_ai_score"])
+        self.assertTrue(result["settings"]["ai"]["use_ai_greeting"])
+        result = apply_full_settings()
+        self.assertFalse(result["pending_apply"])
+        self.assertFalse(DEFAULT_CONFIG["ai"]["use_ai_score"])
+        self.assertTrue(DEFAULT_CONFIG["ai"]["use_ai_greeting"])
 
 
 if __name__ == "__main__":

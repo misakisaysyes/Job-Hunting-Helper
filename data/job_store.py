@@ -401,14 +401,19 @@ class JobStore:
         self.conn.commit()
         return cursor.rowcount == 1
 
-    def start_greeting(self, platform: str, source_job_id: str) -> bool:
-        """Explicitly let a scored job enter the greeting stage without a draft."""
+    def start_greeting(self, platform: str, source_job_id: str, *,
+                       allow_below_threshold: bool = False) -> bool:
+        """Require a qualifying score unless the user explicitly overrides it."""
         now = datetime.now(timezone.utc).isoformat()
         cursor = self.conn.execute(
             """UPDATE collected_jobs SET job_status = 'greeting_ready', updated_at = ?
                WHERE platform = ? AND source_job_id = ? AND job_status = 'scored'
-                 AND greeting_send_state = 'idle'""",
-            (now, platform, source_job_id),
+                 AND greeting_send_state = 'idle'
+                 AND (ai_score_status = 'not_scored'
+                      OR (ai_score_status = 'scored' AND ai_score IS NOT NULL
+                          AND (? OR (? IS NOT NULL AND ai_score >= ?))))""",
+            (now, platform, source_job_id, allow_below_threshold is True,
+             self.score_threshold, self.score_threshold),
         )
         if cursor.rowcount == 1:
             self._record_status(platform, source_job_id, "greeting_ready", now)

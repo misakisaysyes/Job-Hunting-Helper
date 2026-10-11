@@ -1,4 +1,4 @@
-"""Automatic greetings follow the configured score threshold and persist."""
+"""Automatic greetings work independently and honor scoring when enabled."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from ai import AIRequestError, AITaskScheduler
+from api.collection import CollectionRun
 from cli.cli import build_parser, resolve_config
 from collector.models import JobCandidate, PlatformCollectionResult
 from config import DEFAULT_CONFIG
@@ -133,6 +134,45 @@ class AIGreetingCollectionTests(unittest.TestCase):
         self.assertEqual(job["ai_greeting_error"], "模型暂不可用")
         self.assertEqual(result.counts["ai_greeting_failed"], 1)
 
+    def test_greeting_only_generates_without_scoring_or_using_fixed_template(self) -> None:
+        self.config["ai"].update(use_ai_score=False, use_ai_greeting=True,
+                                 score_threshold=100, greeting_template="固定模板",
+                                 greeting_user_prompt="突出浏览器性能优化")
+        calls = []
+        records = []
+
+        def model(system, user):
+            calls.append((system, json.loads(user)))
+            self.assertNotIn("岗位匹配评估员", system)
+            return "您好，我有浏览器性能优化经验，希望聊聊这个岗位。"
+
+        result = self.run_jobs([_job("one"), _job("two")], model, records.append)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(all(call[1]["用户补充要求"] == "突出浏览器性能优化" for call in calls))
+        self.assertTrue(all("ai_score_status" not in record for record in records))
+        self.assertNotIn("ai_scored", result.counts)
+        self.assertNotIn("ai_score_failed", result.counts)
+        self.assertEqual(result.counts["ai_greeting_generated"], 2)
+        self.assertEqual(result.counts["ai_greeting_failed"], 0)
+        for job in self.stored_jobs().values():
+            self.assertEqual(job["ai_score_status"], "not_scored")
+            self.assertIsNone(job["ai_score"])
+            self.assertEqual(job["job_status"], "greeting_ready")
+            self.assertEqual(job["greeting"], "您好，我有浏览器性能优化经验，希望聊聊这个岗位。")
+
+    def test_greeting_only_missing_key_is_rejected_before_starting_collection(self) -> None:
+        with patch.dict(DEFAULT_CONFIG["ai"], {"use_ai_score": False, "use_ai_greeting": True}), \
+                patch.dict(DEFAULT_CONFIG["collection"], {
+                    "mode": "recommend", "encrypt_expect_id": ["test-id"], "keywords": []}), \
+                patch("api.collection.current_api_key", return_value=""), \
+                patch("api.collection.Thread") as thread:
+            runner = CollectionRun(Path(self.temp.name) / "task.sqlite")
+            with self.assertRaisesRegex(ValueError, "缺少 AI API Key"):
+                runner.start()
+            self.assertEqual(runner.snapshot()["status"], "idle")
+            self.assertIsNone(runner.snapshot()["run_id"])
+            thread.assert_not_called()
+
     def test_collection_waits_for_greeting(self) -> None:
         self.config["ai"]["use_ai_greeting"] = True
         started = threading.Event()
@@ -164,15 +204,17 @@ class AIGreetingCollectionTests(unittest.TestCase):
         self.assertFalse(thread.is_alive())
         self.assertEqual(self.stored_jobs()["one"]["greeting"], "您好，想了解岗位。")
 
-    def test_cli_override_and_scoring_dependency(self) -> None:
+    def test_cli_can_enable_greetings_independently_of_scoring(self) -> None:
         parser = build_parser()
         config = resolve_config(parser.parse_args(["--use-ai-greeting", "--encrypt-expect-id", "test-id"]), parser)
         self.assertTrue(config["ai"]["use_ai_greeting"])
         config = resolve_config(parser.parse_args(["--no-use-ai-greeting", "--encrypt-expect-id", "test-id"]), parser)
         self.assertFalse(config["ai"]["use_ai_greeting"])
-        self.config["ai"].update(use_ai_score=False, use_ai_greeting=True)
-        with self.assertRaisesRegex(ValueError, "必须同时启用"):
-            validate_run_config(self.config)
+        config = resolve_config(parser.parse_args([
+            "--no-use-ai-score", "--use-ai-greeting", "--encrypt-expect-id", "test-id"]), parser)
+        self.assertFalse(config["ai"]["use_ai_score"])
+        self.assertTrue(config["ai"]["use_ai_greeting"])
+        self.assertIs(validate_run_config(config), config)
 
 
 if __name__ == "__main__":

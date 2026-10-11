@@ -101,8 +101,6 @@ def generate_greeting(db_path: Path, config: dict, scheduler: AITaskScheduler,
     job = get_job(db_path, config, platform, job_id)
     if job["job_status"] != "greeting_ready" or job["greeting_send_state"] != "idle":
         raise JobActionError("当前岗位状态不能生成招呼语", 409)
-    if job["ai_score_status"] == "not_scored":
-        raise JobActionError("此岗位未启用 AI 评分，请手动编辑招呼语", 409)
     resume_text = load_resume_text(config)
     try:
         task = make_greeting_task(job, resume_text, config["ai"]["greeting_user_prompt"])
@@ -129,13 +127,14 @@ def save_greeting(db_path: Path, config: dict, platform: str,
         return store.get_job(platform, job_id)
 
 
-def start_greeting(db_path: Path, config: dict, platform: str, job_id: str) -> dict:
+def start_greeting(db_path: Path, config: dict, platform: str, job_id: str, *,
+                   allow_below_threshold: bool = False) -> dict:
     with closing(sqlite3.connect(db_path, timeout=10)) as conn:
         store = _store(conn, config)
         if store.get_job(platform, job_id) is None:
             raise JobActionError("岗位不存在", 404)
-        if not store.start_greeting(platform, job_id):
-            raise JobActionError("岗位状态已变化，无法进入打招呼阶段", 409)
+        if not store.start_greeting(platform, job_id, allow_below_threshold=allow_below_threshold):
+            raise JobActionError("岗位状态已变化或评分未达到门槛，无法进入打招呼阶段；低分岗位请在详情选择“仍去打招呼”", 409)
         return store.get_job(platform, job_id)
 
 

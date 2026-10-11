@@ -1,4 +1,4 @@
-"""Run a collection session and coordinate optional AI scoring."""
+"""Run a collection session and coordinate optional AI scoring and greetings."""
 
 from __future__ import annotations
 
@@ -101,8 +101,6 @@ def validate_run_config(config: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("ai.use_ai_score 必须是布尔值")
     if not isinstance(config["ai"]["use_ai_greeting"], bool):
         raise ValueError("ai.use_ai_greeting 必须是布尔值")
-    if config["ai"]["use_ai_greeting"] and not config["ai"]["use_ai_score"]:
-        raise ValueError("启用 ai.use_ai_greeting 时必须同时启用 ai.use_ai_score")
     if not isinstance(config["ai"]["score_user_prompt"], str):
         raise ValueError("ai.score_user_prompt 必须是字符串")
     if not isinstance(config["ai"]["greeting_user_prompt"], str):
@@ -151,7 +149,7 @@ def run_collection(
     on_progress: Callable[[dict[str, int]], None] | None = None,
     ai_scheduler: AITaskScheduler | None = None,
 ) -> PlatformCollectionResult:
-    """Run the configured platform collection session and optional AI scoring."""
+    """Run the configured collection session with independently optional AI tasks."""
     validate_run_config(config)
     if config["collection"]["test_prefilter"]:
         _check_prefilter(on_event)
@@ -178,7 +176,7 @@ def run_collection(
                 if on_progress is not None:
                     on_progress(progress_counts.copy())
 
-            if not config["ai"]["use_ai_score"]:
+            if not config["ai"]["use_ai_score"] and not config["ai"]["use_ai_greeting"]:
                 qualified = 0
 
                 def save_plain(job: JobCandidate) -> None:
@@ -216,8 +214,31 @@ def run_collection(
             greeting_jobs = []
             scored = failed = greeting_generated = greeting_failed = qualified = 0
 
+            def submit_greeting(record: dict[str, Any]) -> None:
+                nonlocal greeting_failed
+                try:
+                    task = make_greeting_task(
+                        record, resume_text, config["ai"]["greeting_user_prompt"])
+                    greeting_jobs.append((record, scheduler.submit(task)))
+                except Exception as exc:
+                    greeting_failed += 1
+                    record.update(ai_greeting_status="failed", ai_greeting_error=(
+                        str(exc) if isinstance(exc, (AIRequestError, ValueError))
+                        else type(exc).__name__
+                    ))
+                    emit_record(record)
+
+            def submit_unscored(job: JobCandidate) -> None:
+                nonlocal qualified
+                qualified += 1
+                progress_counts["qualified"] = qualified
+                report_counts()
+                if on_event is not None:
+                    on_event(f"本轮目标进度 {qualified}/{target_jobs}")
+                submit_greeting(job.as_job_record())
+
             def finish_score(job: JobCandidate, future: object) -> None:
-                nonlocal scored, failed, greeting_failed, qualified
+                nonlocal scored, failed, qualified
                 record = job.as_job_record()
                 try:
                     score_result = future.result()
@@ -241,17 +262,7 @@ def run_collection(
                                        ai_score_failed=failed)
                 report_counts()
                 if eligible and config["ai"]["use_ai_greeting"]:
-                    try:
-                        task = make_greeting_task(
-                            record, resume_text, config["ai"]["greeting_user_prompt"])
-                        greeting_jobs.append((record, scheduler.submit(task)))
-                    except Exception as exc:
-                        greeting_failed += 1
-                        record.update(ai_greeting_status="failed", ai_greeting_error=(
-                            str(exc) if isinstance(exc, (AIRequestError, ValueError))
-                            else type(exc).__name__
-                        ))
-                        emit_record(record)
+                    submit_greeting(record)
                 else:
                     template = config["ai"]["greeting_template"].strip()
                     if eligible and not config["ai"]["use_ai_greeting"] and template:
@@ -293,7 +304,8 @@ def run_collection(
                     on_counts=report_counts,
                 )
                 result = runner.run(
-                    request, on_job=lambda job: None, on_prefilter_pass=submit_score,
+                    request, on_job=lambda job: None,
+                    on_prefilter_pass=submit_score if config["ai"]["use_ai_score"] else submit_unscored,
                     on_event=on_event, max_jobs=max_jobs,
                 )
                 drain_scores(wait_for_all=True)
@@ -313,7 +325,8 @@ def run_collection(
                         record.update(greeting=greeting_result.text,
                                       ai_greeting_status="generated", ai_greeting_error="")
                     emit_record(record)
-                result.counts.update(ai_scored=scored, ai_score_failed=failed)
+                if config["ai"]["use_ai_score"]:
+                    result.counts.update(ai_scored=scored, ai_score_failed=failed)
                 if result.reason_code:
                     result.counts.update(qualified=qualified, target=target_jobs)
                 if result.reason_code == "target_not_reached":

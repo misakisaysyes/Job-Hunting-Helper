@@ -479,7 +479,8 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                     db_path, DEFAULT_CONFIG, scheduler, platform, job_id))
             elif action == ["greeting", "start"]:
                 self.action_result(lambda: {"job": job_actions.start_greeting(
-                    db_path, DEFAULT_CONFIG, platform, job_id)})
+                    db_path, DEFAULT_CONFIG, platform, job_id,
+                    allow_below_threshold=body.get("allow_below_threshold") is True)})
             elif action == ["greeting", "send"]:
                 self.action_result(lambda: job_actions.send_greeting(
                     db_path, DEFAULT_CONFIG, platform, job_id, body.get("greeting", "")))

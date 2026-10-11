@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { deleteJob, fetchJob, generateGreeting, scoreJob, sendGreeting, startGreeting } from "../../api/jobs";
 import { useAlertSound } from "../../hooks/useAlertSound";
+import { canGenerateGreeting, canOverrideGreetingThreshold, canStartGreeting } from "../../lib/jobStatus";
 
 export const jobKey = (job) => `${job.source_platform}:${job.source_job_id}`;
 
 export default function useJobBatch({ jobs, total, page, pageSize, query, statusFilter,
-  onReload, onJobChange, loading }) {
+  onReload, onJobChange, loading, scoreThreshold }) {
   const [batchMode, setBatchMode] = useState(false);
   const [selectedKeys, setSelectedKeys] = useState(new Set());
   const [busy, setBusy] = useState("");
@@ -41,15 +42,16 @@ export default function useJobBatch({ jobs, total, page, pageSize, query, status
   async function run(action) {
     if (!selectedJobs.length || busy || loading) return;
     let eligible = selectedJobs;
+    const belowThreshold = action === "start"
+      ? selectedJobs.filter((job) => canOverrideGreetingThreshold(job, scoreThreshold)) : [];
     if (action === "score") {
       eligible = selectedJobs.filter((job) => ["scored", "greeting_ready"].includes(job.job_status)
         && job.greeting_send_state === "idle");
     } else if (action === "start") {
-      eligible = selectedJobs.filter((job) => job.job_status === "scored"
-        && job.greeting_send_state === "idle");
+      eligible = selectedJobs.filter((job) => canStartGreeting(job, scoreThreshold)
+        || canOverrideGreetingThreshold(job, scoreThreshold));
     } else if (action === "generate") {
-      eligible = selectedJobs.filter((job) => job.job_status === "greeting_ready"
-        && job.greeting_send_state === "idle" && job.ai_score_status !== "not_scored");
+      eligible = selectedJobs.filter(canGenerateGreeting);
     } else if (action === "send") {
       eligible = selectedJobs.filter((job) => job.job_status === "greeting_ready"
         && job.greeting_send_state === "idle" && job.greeting?.trim());
@@ -62,7 +64,10 @@ export default function useJobBatch({ jobs, total, page, pageSize, query, status
     }
     if (action === "delete" && !window.confirm(`确定删除所选 ${selectedJobs.length} 个岗位吗？删除后可能再次采集入库。`)) return;
     if (action === "score" && eligible.length && !window.confirm(`确定重新评分 ${eligible.length} 个岗位吗？岗位状态会根据新评分重置，未发送的招呼语草稿会清空。${skipped ? `另有 ${skipped} 个岗位将跳过。` : ""}`)) return;
-    if (action === "start" && eligible.length && !window.confirm(`确定将 ${eligible.length} 个岗位流转到打招呼状态吗？${skipped ? `另有 ${skipped} 个岗位将跳过。` : ""}`)) return;
+    if (action === "start" && eligible.length && !window.confirm(
+      `确定将 ${eligible.length} 个岗位流转到打招呼状态吗？${belowThreshold.length
+        ? `其中 ${belowThreshold.length} 个低于当前 ${scoreThreshold} 分门槛，确认后仍会流转。` : ""}${skipped
+        ? `另有 ${skipped} 个岗位将跳过。` : ""}`)) return;
     if (action === "generate" && eligible.length && !window.confirm(`确定为 ${eligible.length} 个岗位生成招呼语吗？已有草稿会被覆盖。`)) return;
     if (action === "send" && eligible.length && !window.confirm(`确定向 ${eligible.length} 个 BOSS 招聘者实际发送已保存的招呼语吗？${skipped ? `另有 ${skipped} 个岗位将跳过。` : ""}`)) return;
 
@@ -79,7 +84,9 @@ export default function useJobBatch({ jobs, total, page, pageSize, query, status
         if (action === "delete") await deleteJob(job);
         else {
           const result = action === "score" ? await scoreJob(job)
-            : action === "start" ? await startGreeting(job)
+            : action === "start" ? await startGreeting(job,
+              canOverrideGreetingThreshold(job, scoreThreshold)
+                ? { allow_below_threshold: true } : {})
               : action === "generate" ? await generateGreeting(job)
                 : await sendGreeting(job, job.greeting);
           if (result.job) onJobChange(result.job);
@@ -114,7 +121,8 @@ export default function useJobBatch({ jobs, total, page, pageSize, query, status
       } else {
         for (const job of eligible) {
           await perform(job);
-          if (action === "send" && (failures.length || presetSent)) break;
+          // A BOSS preset greeting may affect later jobs, so pause only for that case.
+          if (action === "send" && presetSent) break;
         }
       }
       const remaining = eligible.length - processed;

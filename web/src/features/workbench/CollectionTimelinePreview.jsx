@@ -57,7 +57,7 @@ export default function CollectionTimelinePreview({ settings, preview }) {
   const ai = settings.ai;
   const limit = preview.collection.target_jobs;
   const scoreOn = Boolean(ai.use_ai_score);
-  const greetingOn = scoreOn && Boolean(ai.use_ai_greeting);
+  const greetingOn = Boolean(ai.use_ai_greeting);
   const source = collection.mode === "recommend"
     ? `推荐流 · ${collection.encrypt_expect_id.length} 组期望`
     : `搜索流 · ${collection.keywords.length} 个关键词`;

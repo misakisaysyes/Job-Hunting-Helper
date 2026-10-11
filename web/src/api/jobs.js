@@ -10,8 +10,8 @@ export const generateGreeting = (job) =>
 export const scoreJob = (job) =>
   requestJson(`${jobUrl(job)}/score`, jsonOptions("POST"));
 
-export const startGreeting = (job) =>
-  requestJson(`${jobUrl(job)}/greeting/start`, jsonOptions("POST"));
+export const startGreeting = (job, options = {}) =>
+  requestJson(`${jobUrl(job)}/greeting/start`, jsonOptions("POST", options));
 
 export const saveGreeting = (job, greeting) =>
   requestJson(`${jobUrl(job)}/greeting`, jsonOptions("PUT", { greeting }));

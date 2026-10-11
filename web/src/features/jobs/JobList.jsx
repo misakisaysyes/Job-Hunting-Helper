@@ -1,5 +1,5 @@
 import React from "react";
-import { listStatusInfo } from "../../lib/jobStatus";
+import { greetingSendIssue, listStatusInfo } from "../../lib/jobStatus";
 import BulkActions from "./BulkActions";
 import JobDetails from "./JobDetails";
 import JobToolbar from "./JobToolbar";
@@ -31,7 +31,7 @@ export default function JobList({ jobs, total, page, pageSize, loading, scoreThr
   query, onQueryChange, statusFilter, onStatusFilterChange }) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min(total, (page + 1) * pageSize);
-  const batch = useJobBatch({ jobs, total, page, pageSize, query, statusFilter,
+  const batch = useJobBatch({ jobs, total, page, pageSize, query, statusFilter, scoreThreshold,
     onReload: onPage, onJobChange, loading });
   return (
     <section className="panel" aria-label="岗位列表">
@@ -61,6 +61,7 @@ export default function JobList({ jobs, total, page, pageSize, loading, scoreThr
               const key = jobKey(job);
               const score = scoreLabel(job, scoreThreshold);
               const status = listStatusInfo(job, scoreThreshold);
+              const sendIssue = greetingSendIssue(job);
               return <React.Fragment key={key}>
                 <tr>
                   {batch.batchMode && <td className="select-cell"><input type="checkbox"
@@ -68,7 +69,10 @@ export default function JobList({ jobs, total, page, pageSize, loading, scoreThr
                     disabled={loading || Boolean(batch.busy)} onChange={() => batch.toggle(job)} /></td>}
                   <td className="position-cell"><div className="job-title">{job.title || "未命名岗位"}</div>
                     <div className="company">{job.company || "未知公司"} <span className="dot">·</span> {job.city || "城市未知"}</div>
-                    <div className="job-id">{job.source_platform} · {job.source_job_id}</div></td>
+                    <div className="job-id">{job.source_platform} · {job.source_job_id}</div>
+                    {sendIssue && <div className={`job-send-issue ${sendIssue.className}`}>
+                      {sendIssue.label}：{sendIssue.reason}
+                    </div>}</td>
                   <td><div className="salary">{job.salary || "薪资未标注"}</div><div className="requirement">{[job.experience, job.education].filter(Boolean).join(" · ") || "要求未标注"}</div></td>
                   <td><span className={score.className}>{score.text}</span></td>
                   <td><button type="button" className={`job-status ${status.className}`} onClick={() => onExpanded(expanded === key ? "" : key)} aria-expanded={expanded === key}>{status.label}</button></td>

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { confirmGreetingNotSent, fetchJob, generateGreeting, saveGreeting, sendGreeting } from "../../api/jobs";
+import { canGenerateGreeting } from "../../lib/jobStatus";
 
 const MAX_GREETING_LENGTH = 300;
 
@@ -32,8 +33,8 @@ export default function GreetingComposer({ job, active, onJobChange }) {
     }
   }
 
-  const canEdit = active && job.greeting_send_state === "idle";
-  const canGenerate = active && ["scored", "score_failed"].includes(job.ai_score_status);
+  const canEdit = active && canGenerateGreeting(job);
+  const canGenerate = active;
   const trimmed = draft.trim();
   const dirty = trimmed !== (job.greeting || "");
 

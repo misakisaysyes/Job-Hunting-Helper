@@ -35,7 +35,9 @@ class JobWorkflowTests(unittest.TestCase):
         self.save("low", ai_score_status="scored", ai_score=70)
         self.assertFalse(self.store.save_greeting("boss", "low", "您好"))
         self.assertFalse(self.store.reserve_greeting_send("boss", "low", "您好"))
-        self.assertTrue(self.store.start_greeting("boss", "low"))
+        self.assertFalse(self.store.start_greeting("boss", "low"))
+        self.assertEqual(self.store.get_job("boss", "low")["job_status"], "scored")
+        self.assertTrue(self.store.start_greeting("boss", "low", allow_below_threshold=True))
         self.assertFalse(self.store.start_greeting("boss", "low"))
         job = self.store.get_job("boss", "low")
         self.assertEqual(job["job_status"], "greeting_ready")
@@ -47,7 +49,7 @@ class JobWorkflowTests(unittest.TestCase):
                         greeting="您好，想了解岗位。")
         self.assertEqual(job["job_status"], "scored")
         self.assertEqual(JobStore(self.conn).get_job("boss", "low-draft")["job_status"], "scored")
-        self.assertTrue(self.store.start_greeting("boss", "low-draft"))
+        self.assertTrue(self.store.start_greeting("boss", "low-draft", allow_below_threshold=True))
         self.assertEqual(JobStore(self.conn, score_threshold=71).get_job(
             "boss", "low-draft")["job_status"], "greeting_ready")
 
@@ -62,9 +64,37 @@ class JobWorkflowTests(unittest.TestCase):
         self.assertEqual(manual["job_status"], "greeting_ready")
         self.assertEqual(manual["job_status_history"], ["scored", "greeting_ready"])
 
+    def test_default_start_checks_the_current_score_and_threshold(self) -> None:
+        for job_id, values, expected in (
+            ("edge", {"ai_score_status": "scored", "ai_score": 71}, True),
+            ("low", {"ai_score_status": "scored", "ai_score": 70}, False),
+            ("failed", {"ai_score_status": "score_failed"}, False),
+            ("missing", {"ai_score_status": "scored", "ai_score": None}, False),
+            ("no-ai", {"ai_score_status": "not_scored"}, True),
+        ):
+            with self.subTest(job_id=job_id):
+                self.save(job_id, job_status="scored", **values)
+                self.assertEqual(self.store.start_greeting("boss", job_id), expected)
+        self.save("changed", job_status="scored", ai_score_status="scored", ai_score=88)
+        self.conn.execute("UPDATE collected_jobs SET ai_score = 60 WHERE source_job_id = 'changed'")
+        self.conn.commit()
+        self.assertFalse(self.store.start_greeting("boss", "changed"))
+        self.assertFalse(self.store.start_greeting("boss", "changed", allow_below_threshold="true"))
+
+    def test_explicit_low_score_override_still_rejects_failed_or_missing_scores(self) -> None:
+        for job_id, values in (
+            ("failed", {"ai_score_status": "score_failed"}),
+            ("missing", {"ai_score_status": "scored", "ai_score": None}),
+        ):
+            with self.subTest(job_id=job_id):
+                self.save(job_id, job_status="scored", **values)
+                self.assertFalse(self.store.start_greeting(
+                    "boss", job_id, allow_below_threshold=True))
+                self.assertEqual(self.store.get_job("boss", job_id)["job_status"], "scored")
+
     def test_send_is_reserved_once_and_only_verified_send_advances(self) -> None:
         self.save("one", ai_score_status="scored", ai_score=65)
-        self.assertTrue(self.store.start_greeting("boss", "one"))
+        self.assertTrue(self.store.start_greeting("boss", "one", allow_below_threshold=True))
         self.assertTrue(self.store.reserve_greeting_send("boss", "one", "你好，我有相关经验"))
         self.assertFalse(self.store.reserve_greeting_send("boss", "one", "重复发送"))
         self.assertTrue(self.store.finish_greeting_send("boss", "one", outcome="unknown"))

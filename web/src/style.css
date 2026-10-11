@@ -607,6 +607,16 @@ tbody tr:first-child td {
   overflow-wrap:anywhere
 }
 
+.job-send-issue {
+  margin-top:8px;
+  font-size:11px;
+  line-height:1.5;
+  overflow-wrap:anywhere;
+}
+
+.job-send-issue.error { color:#bc3f3f; }
+.job-send-issue.warning { color:#9f6a14; }
+
 .salary {
   color:#65748b;
   font-size:14px;

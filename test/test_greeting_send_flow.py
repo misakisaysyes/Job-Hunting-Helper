@@ -8,6 +8,7 @@ from pathlib import Path
 import sqlite3
 import sys
 from tempfile import TemporaryDirectory
+from threading import Event
 from types import SimpleNamespace
 import unittest
 from unittest.mock import ANY, MagicMock, patch
@@ -18,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from api.jobs import JobActionError, confirm_greeting_not_sent, generate_greeting, open_conversation, send_greeting, start_greeting
+from ai import AITaskScheduler
+from api.server import make_handler
 from browser.browser import ChromeBrowser
 from browser.boss_message import SendResult, _same_recruiter_history, send_boss_greeting
 from config import DEFAULT_CONFIG
@@ -101,11 +104,37 @@ class GreetingSendFlowTests(unittest.TestCase):
                     "source_platform": "boss", "source_job_id": "low",
                     "ai_score_status": "scored", "ai_score": 65,
                 })
-            job = start_greeting(db_path, config, "boss", "low")
+            with self.assertRaisesRegex(JobActionError, "评分未达到门槛"):
+                start_greeting(db_path, config, "boss", "low")
+            job = start_greeting(db_path, config, "boss", "low", allow_below_threshold=True)
             self.assertEqual(job["job_status"], "greeting_ready")
             self.assertEqual(job["greeting"], "")
             with self.assertRaisesRegex(JobActionError, "岗位状态已变化"):
                 start_greeting(db_path, config, "boss", "low")
+
+    def test_start_endpoint_only_accepts_an_explicit_boolean_override(self) -> None:
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "jobs.sqlite"
+            with patch.dict(DEFAULT_CONFIG["ai"], {"score_threshold": 71}):
+                with closing(sqlite3.connect(db_path)) as conn:
+                    JobStore(conn, score_threshold=71).save({
+                        "source_platform": "boss", "source_job_id": "low",
+                        "ai_score_status": "scored", "ai_score": 65,
+                    })
+                handler_class = make_handler(db_path, MagicMock(), restart_event=Event(),
+                    started_ai_concurrency=1, state_db_overridden=True, server_instance_id="test")
+                handler = object.__new__(handler_class)
+                handler.path = "/api/jobs/boss/low/greeting/start"
+                handler.send_json = MagicMock()
+                for value in (None, False, "true", 1, True):
+                    with self.subTest(value=value):
+                        handler.read_json = MagicMock(return_value={} if value is None
+                            else {"allow_below_threshold": value})
+                        handler.do_POST()
+                        code, body = handler.send_json.call_args.args
+                        self.assertEqual(code, 200 if value is True else 409)
+                        if value is True:
+                            self.assertEqual(body["job"]["job_status"], "greeting_ready")
 
     def test_ai_generation_persists_greeting_ready_state(self) -> None:
         config = deepcopy(DEFAULT_CONFIG)
@@ -154,6 +183,34 @@ class GreetingSendFlowTests(unittest.TestCase):
                 job = JobStore(conn).get_job("boss", "sent")
             self.assertEqual(job["job_status"], "greeted")
             self.assertEqual(job["greeting"], "已发送的招呼语")
+
+    def test_unscored_job_can_generate_and_save_without_enabling_scoring(self) -> None:
+        config = deepcopy(DEFAULT_CONFIG)
+        config["ai"].update(use_ai_score=False, use_ai_greeting=False)
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "jobs.sqlite"
+            resume = Path(directory) / "resume.md"
+            resume.write_text("做过浏览器性能优化", encoding="utf-8")
+            config["profile"]["resume_path"] = str(resume)
+            with closing(sqlite3.connect(db_path)) as conn:
+                JobStore(conn).save({
+                    "source_platform": "boss", "source_job_id": "unscored",
+                    "title": "前端工程师", "jd": "负责浏览器性能优化",
+                })
+
+            def model(system, user):
+                self.assertNotIn("岗位匹配评估员", system)
+                self.assertIn("浏览器性能优化", user)
+                return "您好，我有浏览器性能优化经验，希望聊聊这个岗位。"
+
+            with AITaskScheduler(config, model_call=model) as scheduler:
+                result = generate_greeting(db_path, config, scheduler, "boss", "unscored")
+            self.assertEqual(result["job"]["ai_score_status"], "not_scored")
+            self.assertIsNone(result["job"]["ai_score"])
+            self.assertEqual(result["job"]["job_status"], "greeting_ready")
+            self.assertEqual(result["greeting"], "您好，我有浏览器性能优化经验，希望聊聊这个岗位。")
+            with closing(sqlite3.connect(db_path)) as conn:
+                self.assertEqual(JobStore(conn).get_job("boss", "unscored")["greeting"], result["greeting"])
 
     def test_view_conversation_uses_connected_chrome(self) -> None:
         config = deepcopy(DEFAULT_CONFIG)
@@ -231,6 +288,32 @@ class GreetingSendFlowTests(unittest.TestCase):
             self.assertEqual(job["chat_url"], chat_url)
             with closing(sqlite3.connect(db_path)) as conn:
                 self.assertEqual(JobStore(conn).get_job("boss", "job-id")["chat_url"], chat_url)
+
+    def test_definite_send_failure_records_reason_and_does_not_block_next_job(self) -> None:
+        config = deepcopy(DEFAULT_CONFIG)
+        reason = "对应会话的输入框在 8 秒内未出现；自定义招呼语尚未提交"
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "jobs.sqlite"
+            with closing(sqlite3.connect(db_path)) as conn:
+                store = JobStore(conn, score_threshold=71)
+                for job_id in ("first", "second"):
+                    store.save({"source_platform": "boss", "source_job_id": job_id,
+                                "ai_score_status": "scored", "ai_score": 88})
+            with patch("api.jobs.send_boss_greeting", side_effect=[
+                SendResult(False, False, reason),
+                SendResult(True, False, "已确认发送",
+                           "https://www.zhipin.com/web/geek/chat?jobId=second"),
+            ]) as sender:
+                with self.assertRaisesRegex(JobActionError, "输入框在 8 秒内未出现"):
+                    send_greeting(db_path, config, "boss", "first", "第一条招呼语")
+                result = send_greeting(db_path, config, "boss", "second", "第二条招呼语")
+            self.assertEqual(sender.call_count, 2)
+            self.assertEqual(result["job"]["greeting_send_state"], "sent")
+            with closing(sqlite3.connect(db_path)) as conn:
+                failed = JobStore(conn).get_job("boss", "first")
+            self.assertEqual(failed["greeting_send_state"], "idle")
+            self.assertEqual(failed["greeting_send_note"], reason)
+            self.assertEqual(failed["job_status"], "greeting_ready")
 
     def test_uncertain_send_keeps_reason_and_prevents_retry(self) -> None:
         config = deepcopy(DEFAULT_CONFIG)

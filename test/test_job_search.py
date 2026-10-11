@@ -74,7 +74,7 @@ class JobSearchTests(unittest.TestCase):
     def test_status_and_pagination_follow_filtered_results(self) -> None:
         self.assertEqual(self.find("", "scored"), ["campus"])
         self.assertEqual(self.find("", "greeting_ready"), ["react"])
-        self.store.start_greeting("boss", "campus")
+        self.store.start_greeting("boss", "campus", allow_below_threshold=True)
         self.assertEqual(self.find("", "scored"), [])
         self.assertEqual(self.find("", "greeting_ready"), ["campus", "react"])
         jobs, total = self.store.search_jobs(limit=1, offset=1, matches=compile_search("产品 || React"))

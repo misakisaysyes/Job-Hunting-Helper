@@ -15,6 +15,37 @@ export function statusInfo(value) {
   return JOB_STATUSES[value] || JOB_STATUSES.collected;
 }
 
+export function canStartGreeting(job, scoreThreshold) {
+  if (job.job_status !== "scored" || job.greeting_send_state !== "idle") return false;
+  return job.ai_score_status === "not_scored"
+    || (job.ai_score_status === "scored" && job.ai_score != null
+      && Number.isFinite(Number(job.ai_score)) && Number.isFinite(scoreThreshold)
+      && Number(job.ai_score) >= scoreThreshold);
+}
+
+export function canOverrideGreetingThreshold(job, scoreThreshold) {
+  return job.job_status === "scored" && job.greeting_send_state === "idle"
+    && job.ai_score_status === "scored" && job.ai_score != null
+    && Number.isFinite(Number(job.ai_score)) && Number.isFinite(scoreThreshold)
+    && Number(job.ai_score) < scoreThreshold;
+}
+
+export function canGenerateGreeting(job) {
+  return job.job_status === "greeting_ready" && job.greeting_send_state === "idle";
+}
+
+export function greetingSendIssue(job) {
+  if (job.job_status !== "greeting_ready") return null;
+  const note = job.greeting_send_note?.trim();
+  if (job.greeting_send_state === "unknown") {
+    return { label: "发送结果待确认", reason: note || "请到 BOSS 会话中核查", className: "warning" };
+  }
+  if (job.greeting_send_state === "idle" && note && note !== "已人工确认未发送") {
+    return { label: "上次发送失败", reason: note, className: "error" };
+  }
+  return null;
+}
+
 export function listStatusInfo(job, scoreThreshold) {
   const status = job.job_status;
   const belowThreshold = job.ai_score_status === "scored" &&

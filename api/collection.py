@@ -57,7 +57,7 @@ class CollectionRun:
             config["safety"]["state_db"] = str(self.db_path)
             config["collection"]["max_jobs"] = 0
             validate_run_config(config)
-            if config["ai"]["use_ai_score"]:
+            if config["ai"]["use_ai_score"] or config["ai"]["use_ai_greeting"]:
                 key_env = config["ai"]["api_key_env"]
                 if not current_api_key(key_env):
                     raise ValueError(f"缺少 AI API Key：请在配置页填写并生效，或设置 {key_env} 后重启 API 服务")

@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useState } from "react";
 import { forceEnd, openConversation, startGreeting } from "../../api/jobs";
-import { statusInfo } from "../../lib/jobStatus";
+import { canStartGreeting, statusInfo } from "../../lib/jobStatus";
 import GreetingComposer from "./GreetingComposer";
 import "./details.css";
 
@@ -59,7 +59,7 @@ export default function JobDetails({ job, scoreThreshold, onJobChange }) {
 
   function selectStage(status) {
     if (busy) return;
-    if (status === "greeting_ready" && job.job_status === "scored" && !belowThreshold) {
+    if (status === "greeting_ready" && canStartGreeting(job, scoreThreshold)) {
       advance("start", () => startGreeting(job));
     } else {
       setSelected(status);
@@ -108,7 +108,7 @@ export default function JobDetails({ job, scoreThreshold, onJobChange }) {
               <div className="detail-card-heading">
                 <strong>AI 评分与理由</strong>
                 {belowThreshold && active && <button type="button" className="text-button"
-                  onClick={() => advance("start", () => startGreeting(job))} disabled={Boolean(busy)}>
+                  onClick={() => advance("start", () => startGreeting(job, { allow_below_threshold: true }))} disabled={Boolean(busy)}>
                   {busy === "start" ? "处理中…" : "仍去打招呼"}
                 </button>}
               </div>

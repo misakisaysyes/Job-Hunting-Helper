@@ -726,8 +726,8 @@ class BossCollector:
                             hooks.on_event(message=f"BOSS 详情预筛：{filter_reason}", increment_filtered=True)
                             continue
                         continue_collecting = hooks.on_candidate(merged)
-                        # The run entry point submits scoring here when use_ai_score
-                        # is enabled; the collector can continue loading details.
+                        # The run entry point submits enabled AI tasks here;
+                        # the collector can continue loading details.
                         hooks.on_prefilter_pass(merged)
                         if hooks.target_count and hooks.target_reached():
                             return target_met()

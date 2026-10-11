@@ -16,6 +16,7 @@ export function CollectionBasics({ settings, checks, onSave }) {
       cdpUrl: settings.browser.cdp_url,
       resumePath: settings.profile.resume_path,
       useAiScore: settings.ai.use_ai_score,
+      useAiGreeting: settings.ai.use_ai_greeting,
     });
   }, [settings]);
 
@@ -36,7 +37,7 @@ export function CollectionBasics({ settings, checks, onSave }) {
         profile: { resume_path: draft.resumePath },
         ai: {
           use_ai_score: draft.useAiScore,
-          use_ai_greeting: draft.useAiScore && settings.ai.use_ai_greeting,
+          use_ai_greeting: draft.useAiGreeting,
         },
       });
       setNotice({ type: "success", text: "采集配置已保存，下轮任务生效。" });
@@ -70,7 +71,12 @@ export function CollectionBasics({ settings, checks, onSave }) {
         onChange={(event) => update("useAiScore", event.target.checked)} />
       启用 AI 评分
     </label>
-    {draft.useAiScore && <>
+    <label className="workbench-checkbox">
+      <input type="checkbox" checked={draft.useAiGreeting}
+        onChange={(event) => update("useAiGreeting", event.target.checked)} />
+      自动生成招呼语
+    </label>
+    {(draft.useAiScore || draft.useAiGreeting) && <>
       <label>简历文件路径
         <input value={draft.resumePath} onChange={(event) => update("resumePath", event.target.value)} />
       </label>

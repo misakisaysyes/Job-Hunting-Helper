@@ -96,7 +96,7 @@ DEFAULT_CONFIG = {
         "cdp_url": "http://127.0.0.1:9222",
     },
     "profile": {
-        # 临时测试简历文件路径；启用 AI 评分时读取。
+        # 临时测试简历文件路径；启用 AI 评分或生成招呼语时读取。
         "resume_path": str(PROJECT_ROOT / "data" / "resumes" / "resume.md"),
         # 接受的岗位学历标签，多个值按 OR 匹配，[] 表示不限。
         # 可选：学历不限、初中及以下、中专/中技、高中、大专、本科、硕士、博士。
@@ -129,7 +129,7 @@ DEFAULT_CONFIG = {
     "ai": {
         # 是否在采集时为预筛通过的完整岗位运行 AI 评分；可选 True / False。
         "use_ai_score": True,
-        # 是否为评分达到 score_threshold 的岗位自动生成招呼语；可选 True / False，默认关闭。
+        # 是否自动生成招呼语；可独立开启，启用评分时只为达到门槛的岗位生成，默认关闭。
         "use_ai_greeting": False,
         # 评分时传给模型的用户补充要求；空字符串表示没有补充要求。
         "score_user_prompt": "",

@@ -152,9 +152,6 @@ export default function ConfigurationPage() {
     setDraft((current) => {
       const nextValue = typeof value === "function" ? value(current[section][key]) : value;
       const next = { ...current, [section]: { ...current[section], [key]: nextValue } };
-      if (section === "ai" && key === "use_ai_score" && !nextValue) {
-        next.ai.use_ai_greeting = false;
-      }
       return next;
     });
     setDirty(true);
@@ -253,7 +250,6 @@ export default function ConfigurationPage() {
           onUploaded={resumeUploaded} onUploadingChange={setUploadingResume} />
       : <ConfigField key={path} section={section} name={name} original={original}
           value={draft[section][name]}
-          disabled={path === "ai.use_ai_greeting" && !draft.ai.use_ai_score}
           onChange={(value) => update(section, name, value)} />;
   }
 

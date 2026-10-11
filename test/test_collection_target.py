@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from ai import AITaskScheduler
+from ai import AIRequestError, AITaskScheduler
 from collector.platforms.boss import JS_DETECT_COLLECTION_RISK, JS_EXTRACT_DETAIL
 from config import DEFAULT_CONFIG
 from data.job_store import JobStore
@@ -132,6 +132,39 @@ class CollectionTargetTests(unittest.TestCase):
         self.assertEqual(combos[:4], combos[4:])
         self.assertEqual(result.reason_code, "target_not_reached")
         self.assertEqual(result.counts["qualified"], 1)
+
+    def test_greeting_only_target_counts_prefiltered_jobs_even_if_generation_fails(self):
+        self.config["ai"].update(use_ai_score=False, use_ai_greeting=True, score_threshold=100)
+        resume = Path(self.temp.name) / "resume.md"
+        resume.write_text("前端开发经验", encoding="utf-8")
+        self.config["profile"]["resume_path"] = str(resume)
+        browser = FakeBrowser(lambda _method, params, _number:
+                              [api_job("first" if params["encryptExpectId"] == "a" else "second")])
+
+        def model(system, user):
+            self.assertNotIn("岗位匹配评估员", system)
+            if '"source_job_id": "second"' in user:
+                raise AIRequestError("模型暂不可用")
+            return "您好，想了解岗位。"
+
+        with AITaskScheduler(self.config, model_call=model) as scheduler:
+            progress = []
+            result = self.run_with_browser(browser, scheduler, progress.append)
+        self.assertEqual([params["encryptExpectId"] for _, params in browser.requests], ["a", "b"])
+        self.assertEqual(result.reason_code, "target_reached")
+        self.assertEqual(result.counts["qualified"], 2)
+        self.assertEqual(result.counts["ai_greeting_generated"], 1)
+        self.assertEqual(result.counts["ai_greeting_failed"], 1)
+        self.assertTrue(any(item.get("qualified") == 2 for item in progress))
+        self.assertTrue(all("ai_scored" not in item for item in progress))
+        with closing(sqlite3.connect(self.config["safety"]["state_db"])) as conn:
+            store = JobStore(conn)
+            for job_id in ("first", "second"):
+                job = store.get_job("boss", job_id)
+                self.assertEqual(job["job_status"], "greeting_ready")
+                self.assertEqual(job["ai_score_status"], "not_scored")
+                self.assertIsNone(job["ai_score"])
+            self.assertEqual(store.get_job("boss", "second")["ai_greeting_error"], "模型暂不可用")
 
     def test_duplicate_jobs_count_only_distinct_jobs_already_in_database(self):
         self.config["ai"]["use_ai_score"] = False
