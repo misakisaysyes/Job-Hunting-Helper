@@ -37,6 +37,15 @@ def _confirm_delete_dialog(page: Any) -> str | None:
 
 
 def delete_new_greeting(cdp_url: str, candidate: dict[str, Any]) -> FilterDeleteResult:
+    return _delete_boss_conversation(cdp_url, candidate, "新招呼")
+
+
+def delete_exchanged_conversation(cdp_url: str, candidate: dict[str, Any]) -> FilterDeleteResult:
+    return _delete_boss_conversation(cdp_url, candidate, "有交换")
+
+
+def _delete_boss_conversation(cdp_url: str, candidate: dict[str, Any],
+                              tab_label: str) -> FilterDeleteResult:
     browser = ChromeBrowser(cdp_url)
     attempted = False
     try:
@@ -44,15 +53,19 @@ def delete_new_greeting(cdp_url: str, candidate: dict[str, Any]) -> FilterDelete
         if tab is None:
             return FilterDeleteResult(False, False, "无法打开 BOSS 消息页")
         page = browser.page(tab)
-        friends = _tab_friends(page, "新招呼", None)
+        friends = _tab_friends(page, tab_label, None)
         friend = next((row for row in friends
                        if str(row.get("uid") or "") == candidate["conversation_id"]), None)
         if friend is None:
-            return FilterDeleteResult(False, False, "会话已不在「新招呼」列表，未删除")
+            return FilterDeleteResult(False, False, f"会话已不在「{tab_label}」列表，未删除")
         avatar = str(friend.get("avatar") or "").split("?", 1)[0]
+        candidate_avatar = str(candidate.get("avatar") or "").split("?", 1)[0]
+        candidate_job_id = str(candidate.get("source_job_id") or "")
         if (str(friend.get("brandName") or "").strip() != candidate["company"]
                 or str(friend.get("name") or "").strip() != candidate["recruiter"]
-                or avatar != candidate["avatar"]):
+                or (candidate_avatar and avatar != candidate_avatar)
+                or (candidate_job_id and str(friend.get("encryptJobId") or "") != candidate_job_id)
+                or not avatar):
             return FilterDeleteResult(False, False, "公司或招聘者信息已变化，未删除")
 
         page.evaluate("""() => {
@@ -110,9 +123,9 @@ def delete_new_greeting(cdp_url: str, candidate: dict[str, Any]) -> FilterDelete
         if confirmation_error:
             return FilterDeleteResult(False, True, confirmation_error)
         page.wait_for_timeout(700)
-        remaining = _tab_friends(page, "新招呼", None)
+        remaining = _tab_friends(page, tab_label, None)
         if all(str(item.get("uid") or "") != candidate["conversation_id"] for item in remaining):
-            return FilterDeleteResult(True, False, "已从 BOSS「新招呼」列表删除并复核")
+            return FilterDeleteResult(True, False, f"已从 BOSS「{tab_label}」列表删除并复核")
         return FilterDeleteResult(False, True, "删除后会话仍在列表中，请人工核查")
     except Exception as exc:
         return FilterDeleteResult(False, attempted, f"删除会话时出现 {type(exc).__name__}，请人工核查")

@@ -174,6 +174,11 @@ MONITORING_CONFIG = {
     # 追问只扫描「仅沟通」中最近活动的会话；默认关闭自动追问功能。
     "followup_enabled": False,
     "followup_days": 4,
+    # 「有交换」与「新招呼」各自按列表最近活动时间限制扫描范围。
+    "exchanged_active_days": 4,
+    "new_greetings_active_days": 4,
+    # 从会话首次入库时间起算的追问有效期，超过后不再生成或发送追问。
+    "followup_valid_days": 7,
     "followup_unread": True,
     "followup_read_no_reply": True,
     "followup_cooldown_hours": 24,

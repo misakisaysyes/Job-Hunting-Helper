@@ -163,9 +163,11 @@ button:disabled {
   font-size:12px
 }
 
-.monitoring-phase-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:15px; }
+.monitoring-phase-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:15px; }
 .monitoring-phase { min-width:0; padding:15px 17px; border:1px solid #e3e9f1; border-radius:11px; background:#fbfcfe; }
-.monitoring-phase-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.monitoring-phase-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
+.monitoring-phase-actions { display:flex; align-items:center; gap:12px; }
+.monitoring-phase-actions .start-button { padding:7px 10px; font-size:12px; }
 .monitoring-phase-head h3 { margin:0; color:#34465c; font-size:14px; }
 .monitoring-phase-status { flex:none; color:#718199; font-size:12px; font-weight:700; }
 .monitoring-phase.scanning .monitoring-phase-status,.monitoring-phase.processing .monitoring-phase-status { color:#1978e6; }
@@ -215,6 +217,20 @@ button:disabled {
   font-size:13px
 }
 
+.monitoring-select { position:relative; min-width:0; }
+.monitoring-select select { padding-right:82px; }
+.monitoring-select-count {
+  position:absolute;
+  right:36px;
+  top:50%;
+  transform:translateY(-50%);
+  color:#617188;
+  font-size:12px;
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+  pointer-events:none;
+}
+
 .monitoring-filters input:focus,.monitoring-filters select:focus {
   outline:2px solid #b8d8f4;
   border-color:#77abe0
@@ -244,12 +260,6 @@ button:disabled {
 }
 
 .monitoring-table { min-width:1100px; }
-.monitoring-batch-status-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin:16px 0; }
-.monitoring-batch-status-card { padding:18px 22px; border:1px solid #dce5ef; border-radius:11px; background:#fff; }
-.monitoring-batch-status-card .monitoring-phase-head { margin-bottom:16px; }
-.monitoring-batch-status-card p { color:#748398; font-size:12px; line-height:1.6; margin:0; }
-.monitoring-batch-status-card .detail-error { color:#c94848; }
-@media (max-width:700px) { .monitoring-batch-status-grid { grid-template-columns:1fr; } }
 .monitoring-conversation-table th:nth-child(1) { width:36%; }
 .monitoring-conversation-table th:nth-child(2) { width:12%; }
 .monitoring-conversation-table th:nth-child(3) { width:18%; }
@@ -286,6 +296,8 @@ button:disabled {
 .followup-availability { display:inline-block; border-radius:5px; padding:4px 8px; font-size:12px; font-weight:700; white-space:nowrap; }
 .followup-availability.available { background:#e8f6ef; color:#168253; }
 .followup-availability.cooling { background:#edf4ff; color:#4c78ab; }
+.followup-availability.pending { background:#fff4e1; color:#9f6a14; }
+.followup-availability.unavailable { background:#f1f3f6; color:#66758a; }
 .followup-availability-cell small { display:block; margin-top:7px; color:#7e8da3; font-size:11px; line-height:1.5; }
 .monitoring-followup-card .text-button { margin-right:0; }
 .followup-modal-backdrop { position:fixed; inset:0; z-index:100; background:rgba(26,39,60,.44); display:grid; place-items:center; padding:20px; }
@@ -334,23 +346,6 @@ h1 {
   color:#7e899a;
   margin:11px 0 0;
   font-size:14px
-}
-
-.refresh-button {
-  background:#fff;
-  border:1px solid #dce2ea;
-  border-radius:9px;
-  padding:10px 16px;
-  color:#344458;
-  font-size:13px;
-  font-weight:600;
-  white-space:nowrap;
-  box-shadow:0 1px 2px #1e30400a
-}
-
-.refresh-button:hover:not(:disabled) {
-  border-color:#8bb8ee;
-  color:#176cc3
 }
 
 .heading-actions {
@@ -641,6 +636,12 @@ tbody tr:first-child td {
   color:#79879a
 }
 
+.score-source {
+  margin-top:5px;
+  color:#6d7b8e;
+  font-size:11px;
+}
+
 .job-status {
   display:inline-block;
   border:0;
@@ -912,14 +913,6 @@ tbody tr:first-child td {
     font-size:27px
   }
 
-  .refresh-button {
-    padding:9px 11px
-  }
-
-  .refresh-button span {
-    display:none
-  }
-
   .heading-actions {
     gap:7px
   }
@@ -942,10 +935,6 @@ tbody tr:first-child td {
 
   .pagination {
     padding:12px 16px
-  }
-
-  .monitoring-section-heading .refresh-button {
-    flex-shrink:0
   }
 
 }

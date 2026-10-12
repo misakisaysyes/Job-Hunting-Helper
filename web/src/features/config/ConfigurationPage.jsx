@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { applyFullSettings, getFullSettings, saveFullSettings } from "../../api/settings";
-import { FIELD_HELP, FIELD_LABELS, FIELD_OPTIONS, RESTART_FIELDS } from "./configFields";
+import { DISABLED_AI_SCORE_NOTICE, FIELD_HELP, FIELD_LABELS, FIELD_OPTIONS, RESTART_FIELDS } from "./configFields";
 import { CONFIG_SECTIONS } from "./configLayout";
 import TagInput from "../../components/TagInput";
 import ResumeUploadField from "./ResumeUploadField";
@@ -293,7 +293,7 @@ export default function ConfigurationPage() {
         <div className="config-modules">
           {section.groups.map((group) => {
             const branch = group.branches?.[draft.collection.mode];
-            return <section className={`config-module${branch ? " config-module-source" : ""}`} key={group.key}>
+            return <section className={`config-module${branch ? " config-module-source" : ""}${group.fields.length ? "" : " config-module-no-fields"}`} key={group.key}>
               <div className="config-module-heading">
                 <h3>{group.title}</h3>
                 {group.description && <p>{group.description}</p>}
@@ -304,6 +304,8 @@ export default function ConfigurationPage() {
                     <h4>岗位评分</h4>
                     <div className="config-fields">
                       {renderField("ai.use_ai_score")}
+                      {!draft.ai.use_ai_score &&
+                        <p className="config-ai-score-note" role="note">{DISABLED_AI_SCORE_NOTICE}</p>}
                       {draft.ai.use_ai_score && <>
                         {renderField("ai.score_threshold")}
                         {renderField("ai.score_user_prompt")}
@@ -319,7 +321,7 @@ export default function ConfigurationPage() {
                     </div>
                   </div>
                 </div>
-                : <div className="config-fields">{group.fields.map(renderField)}</div>}
+                : group.fields.length > 0 && <div className="config-fields">{group.fields.map(renderField)}</div>}
               {branch && <div className={`config-branch config-branch-${draft.collection.mode}`}>
                 <div className="config-module-heading">
                   <h4>{branch.title}需要配置</h4>

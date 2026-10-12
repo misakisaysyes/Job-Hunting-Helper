@@ -1,6 +1,6 @@
 import React, { lazy, Suspense, useEffect, useState } from "react";
 import { forceEnd, openConversation, startGreeting } from "../../api/jobs";
-import { canStartGreeting, statusInfo } from "../../lib/jobStatus";
+import { canForceEnd, canStartGreeting, statusInfo } from "../../lib/jobStatus";
 import GreetingComposer from "./GreetingComposer";
 import "./details.css";
 
@@ -93,9 +93,9 @@ export default function JobDetails({ job, scoreThreshold, onJobChange }) {
       <section className="detail-card workflow-card">
         <div className="detail-card-heading workflow-heading">
           <strong>岗位状态</strong>
-          {["scored", "greeting_ready", "greeted"].includes(job.job_status) &&
+          {canForceEnd(job) &&
             <button type="button" className="delete-button"
-              onClick={confirmForceEnd} disabled={Boolean(busy) || job.greeting_send_state === "sending"}>
+              onClick={confirmForceEnd} disabled={Boolean(busy)}>
               {busy === "force" ? "结束中…" : "结束流程"}
             </button>}
         </div>
@@ -104,6 +104,10 @@ export default function JobDetails({ job, scoreThreshold, onJobChange }) {
         </Suspense>
         <div className="stage-content">
           {scoreStage && <>
+            {job.ai_score_status === "not_scored" && <section className="score-reason">
+              <div className="detail-card-heading"><strong>预筛评分</strong></div>
+              <p>100 分 · 通过预筛条件，未调用 AI 评分。</p>
+            </section>}
             {job.ai_score_status === "scored" && <section className="score-reason">
               <div className="detail-card-heading">
                 <strong>AI 评分与理由</strong>

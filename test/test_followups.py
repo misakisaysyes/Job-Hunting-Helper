@@ -29,7 +29,7 @@ class FollowupTests(unittest.TestCase):
         self.config = {
             "followup_enabled": True, "followup_unread": True,
             "followup_read_no_reply": True, "followup_cooldown_hours": 24,
-            "followup_max_count": 2, "followup_days": 4,
+            "followup_max_count": 2, "followup_days": 4, "followup_valid_days": 7,
         }
         self.greeting = "您好，想了解这个岗位。"
 
@@ -136,6 +136,44 @@ class FollowupTests(unittest.TestCase):
             {**conversation, "followup_count": 2}, self.messages(), None,
             self.config, now=self.now)[1])
 
+    def test_admission_expiry_uses_first_seen_even_with_recent_activity(self) -> None:
+        first_seen = self.now - timedelta(days=7)
+        conversation = {"judgment": "unread", "followup_count": 0,
+                        "followup_status": "none", "first_seen_at": first_seen.isoformat()}
+        self.assertIsNotNone(proposal(conversation, self.messages(), None,
+                                      self.config, now=self.now))
+        expired = {**conversation, "first_seen_at":
+                   (first_seen - timedelta(seconds=1)).isoformat()}
+        self.assertIn("追问有效期", proposal_with_reason(
+            expired, self.messages(), None, self.config, now=self.now)[1])
+        with closing(sqlite3.connect(":memory:")) as conn:
+            store = ConversationStore(conn)
+            store.upsert({"platform": "boss", "conversation_id": "123", "judgment": "unread"},
+                         self.messages())
+            conn.execute("""UPDATE monitored_conversations SET first_seen_at = ?
+                WHERE conversation_id = '123'""", (expired["first_seen_at"],))
+            rows, total = list_conversations(conn, self.config, limit=10, offset=0,
+                followup_status="unavailable", now=self.now)
+            self.assertEqual(total, 1)
+            self.assertEqual(rows[0]["followup_unavailable_cause"], "过期")
+
+    def test_send_rechecks_admission_expiry_before_opening_boss(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite"
+            self.prepare_review(path)
+            expired_at = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+            with closing(sqlite3.connect(path)) as conn:
+                conn.execute("""UPDATE monitored_conversations SET first_seen_at = ?
+                    WHERE conversation_id = '123'""", (expired_at,))
+                conn.commit()
+            with patch("api.followups.send_boss_followup") as send:
+                with self.assertRaisesRegex(JobActionError, "追问有效期"):
+                    send_followup(path, "cdp", "boss", "123")
+            send.assert_not_called()
+            with closing(sqlite3.connect(path)) as conn:
+                self.assertEqual(ConversationStore(conn).get_conversation("boss", "123")
+                                 ["followup_status"], "pending_review")
+
     def test_list_availability_requires_existing_review_draft(self) -> None:
         with closing(sqlite3.connect(":memory:")) as conn:
             store = ConversationStore(conn)
@@ -147,6 +185,7 @@ class FollowupTests(unittest.TestCase):
             rows, _ = store.list_conversations(limit=10, offset=0)
             annotate_followup_availability(conn, rows, self.config)
             self.assertFalse(rows[0]["followup_eligible"])
+            self.assertEqual(rows[0]["followup_display_status"], "available")
             self.assertIn("重新运行监测", rows[0]["followup_reason"])
             self.assertTrue(store.prepare_followup("boss", "123", self.greeting, "100"))
             rows, _ = store.list_conversations(limit=10, offset=0)
@@ -216,22 +255,42 @@ class FollowupTests(unittest.TestCase):
                      f"2026-10-06T12:00:0{identity}+00:00", identity))
             rows, total = list_conversations(conn, self.config, limit=1, offset=1,
                                             followup_status="available", now=self.now)
-            self.assertEqual((total, [row["conversation_id"] for row in rows]), (2, ["3"]))
+            self.assertEqual((total, [row["conversation_id"] for row in rows]), (3, ["5"]))
             self.assertTrue(rows[0]["followup_eligible"])
             rows, total = list_conversations(conn, self.config, limit=1, offset=1,
-                                            followup_status="cooling", now=self.now)
-            self.assertEqual((total, [row["conversation_id"] for row in rows]), (2, ["2"]))
+                                            followup_status="unavailable", now=self.now)
+            self.assertEqual((total, [row["conversation_id"] for row in rows]), (3, ["2"]))
             self.assertTrue(rows[0]["followup_cooldown_until"])
+            self.assertEqual(rows[0]["followup_unavailable_cause"], "冷冻")
             rows, total = list_conversations(conn, self.config, limit=10, offset=0,
                 query="前端", conversation_status="read_no_reply",
                 followup_status="available", now=self.now)
             self.assertEqual((total, [row["conversation_id"] for row in rows]), (1, ["3"]))
             rows, total = list_conversations(conn, self.config, limit=10, offset=0,
-                query="前端", followup_status="cooling", now=self.now)
-            self.assertEqual((total, [row["conversation_id"] for row in rows]), (1, ["2"]))
+                query="前端", followup_status="unavailable", now=self.now)
+            self.assertEqual((total, [row["conversation_id"] for row in rows]), (2, ["2", "1"]))
             rows, total = list_conversations(conn, self.config, limit=10, offset=0,
                 followup_status="followed_up", now=self.now)
             self.assertEqual((total, [row["conversation_id"] for row in rows]), (1, ["1"]))
+            for status, expected_ids in (
+                    ("unavailable", ["4", "2", "1"]),
+                    ("incomplete", ["7"]), ("available", ["6", "5", "3"])):
+                with self.subTest(status=status):
+                    rows, total = list_conversations(conn, self.config, limit=10, offset=0,
+                        followup_status=status, now=self.now)
+                    self.assertEqual((total, [row["conversation_id"] for row in rows]),
+                                     (len(expected_ids), expected_ids))
+                    self.assertTrue(all(row["followup_display_status"] == status for row in rows))
+            rows, _ = list_conversations(conn, self.config, limit=10, offset=0,
+                followup_status="unavailable", now=self.now)
+            self.assertEqual({row["conversation_id"]: row["followup_unavailable_cause"] for row in rows},
+                             {"4": "冷冻", "2": "冷冻", "1": "超追问上限"})
+            store.upsert({"platform": "boss", "conversation_id": "8", "judgment": "unread"},
+                         self.messages(5 * 24))
+            rows, _ = list_conversations(conn, self.config, limit=10, offset=0,
+                followup_status="unavailable", now=self.now)
+            self.assertEqual(next(row for row in rows if row["conversation_id"] == "8")
+                             ["followup_unavailable_cause"], "过期")
             rows, total = list_conversations(conn, {**self.config, "followup_enabled": False},
                 limit=10, offset=0, followup_status="available", now=self.now)
             self.assertEqual((rows, total), ([], 0))
@@ -244,13 +303,29 @@ class FollowupTests(unittest.TestCase):
             self.assertTrue(store.prepare_followup("boss", "123", self.greeting, "100"))
             config = {**self.config, "followup_cooldown_hours": 48}
             deadline = self.now + timedelta(hours=23)
-            for now, available, cooling in ((deadline, 0, 1),
+            for now, available, unavailable in ((deadline, 0, 1),
                                            (deadline + timedelta(seconds=1), 1, 0)):
                 with self.subTest(now=now):
                     self.assertEqual(list_conversations(conn, config, limit=10, offset=0,
                         followup_status="available", now=now)[1], available)
                     self.assertEqual(list_conversations(conn, config, limit=10, offset=0,
-                        followup_status="cooling", now=now)[1], cooling)
+                        followup_status="unavailable", now=now)[1], unavailable)
+
+    def test_incomplete_filter_groups_failure_unknown_and_skipped(self) -> None:
+        with closing(sqlite3.connect(":memory:")) as conn:
+            store = ConversationStore(conn)
+            for identity, status in enumerate(("failed", "unknown", "skipped", "draft_failed"), 1):
+                store.upsert({"platform": "boss", "conversation_id": str(identity),
+                              "judgment": "unread"}, [])
+                conn.execute("""UPDATE monitored_conversations
+                    SET followup_status = ?, updated_at = ?, followup_error = ?
+                    WHERE conversation_id = ?""",
+                    (status, f"2026-10-06T12:00:0{identity}+00:00",
+                     "追问语为空，未发送" if status == "draft_failed" else "", str(identity)))
+            rows, total = list_conversations(conn, self.config, limit=2, offset=1,
+                followup_status="incomplete", now=self.now)
+            self.assertEqual((total, [row["conversation_id"] for row in rows]), (4, ["3", "2"]))
+            self.assertTrue(all(row["followup_display_status"] == "incomplete" for row in rows))
 
     def test_review_send_counts_only_verified_delivery(self) -> None:
         with TemporaryDirectory() as directory:

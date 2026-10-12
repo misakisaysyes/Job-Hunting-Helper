@@ -15,6 +15,7 @@ export default function App() {
   const [activeView, setActiveView] = useState("workbench");
   const [jobs, setJobs] = useState([]);
   const [total, setTotal] = useState(0);
+  const [statusCounts, setStatusCounts] = useState(null);
   const [scoreThreshold, setScoreThreshold] = useState(DEFAULT_SCORE_THRESHOLD);
   const [thresholdWarning, setThresholdWarning] = useState("");
   const [page, setPage] = useState(0);
@@ -22,6 +23,10 @@ export default function App() {
   const [statusFilter, setStatusFilter] = useState("");
   const requestSequence = useRef(0);
   const [loading, setLoading] = useState(true);
+  const loadingRef = useRef(loading);
+  const listViewRef = useRef({ page, query, statusFilter });
+  loadingRef.current = loading;
+  listViewRef.current = { page, query, statusFilter };
   const [deleting, setDeleting] = useState("");
   const [expanded, setExpanded] = useState("");
   const [error, setError] = useState("");
@@ -30,10 +35,12 @@ export default function App() {
   const [statusReady, setStatusReady] = useState(false);
   const [starting, setStarting] = useState(false);
 
-  async function load(nextPage, nextQuery = query, nextStatus = statusFilter) {
+  async function load(nextPage, nextQuery = query, nextStatus = statusFilter, { silent = false } = {}) {
     const sequence = ++requestSequence.current;
-    setLoading(true);
-    setError("");
+    if (!silent) {
+      loadingRef.current = true;
+      setLoading(true);
+    }
     try {
       const params = new URLSearchParams({ limit: PAGE_SIZE, offset: nextPage * PAGE_SIZE });
       if (nextQuery.trim()) params.set("query", nextQuery.trim());
@@ -41,11 +48,13 @@ export default function App() {
       const data = await requestJson(`/api/jobs?${params}`);
       if (sequence !== requestSequence.current) return;
       if (!data.jobs.length && nextPage > 0 && data.total > 0) {
-        await load(Math.ceil(data.total / PAGE_SIZE) - 1, nextQuery, nextStatus);
+        await load(Math.ceil(data.total / PAGE_SIZE) - 1, nextQuery, nextStatus, { silent });
         return;
       }
       setJobs(data.jobs);
       setTotal(data.total);
+      setStatusCounts(data.status_counts || null);
+      setError("");
       if (Number.isFinite(data.score_threshold) && data.score_threshold >= 0 && data.score_threshold <= 100) {
         setScoreThreshold(data.score_threshold);
         setThresholdWarning("");
@@ -57,11 +66,17 @@ export default function App() {
     } catch (cause) {
       if (sequence === requestSequence.current) {
         setError(cause.message || "加载失败");
-        setJobs([]);
-        setTotal(0);
+        if (!silent) {
+          setJobs([]);
+          setTotal(0);
+          setStatusCounts(null);
+        }
       }
     } finally {
-      if (sequence === requestSequence.current) setLoading(false);
+      if (!silent && sequence === requestSequence.current) {
+        loadingRef.current = false;
+        setLoading(false);
+      }
     }
   }
 
@@ -76,10 +91,25 @@ export default function App() {
 
   useEffect(() => {
     requestSequence.current += 1;
+    loadingRef.current = true;
     setLoading(true);
     const timer = window.setTimeout(() => load(0, query, statusFilter), query ? 250 : 0);
     return () => window.clearTimeout(timer);
   }, [query, statusFilter]);
+
+  useEffect(() => {
+    if (activeView !== "collection") return;
+    let active = true;
+    let timer;
+    async function pollJobs() {
+      if (!loadingRef.current) {
+        await load(page, query, statusFilter, { silent: true });
+      }
+      if (active) timer = window.setTimeout(pollJobs, 3000);
+    }
+    timer = window.setTimeout(pollJobs, 3000);
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [activeView, page, query, statusFilter]);
 
   useEffect(() => {
     if (collection.status !== "running") return;
@@ -94,7 +124,8 @@ export default function App() {
         setCollectionError("");
         if (state.status !== "running") {
           keepPolling = false;
-          load(0);
+          const current = listViewRef.current;
+          if (!loadingRef.current) void load(current.page, current.query, current.statusFilter, { silent: true });
         }
       } catch (cause) {
         if (active) setCollectionError(cause.message || "无法读取采集状态");
@@ -150,15 +181,15 @@ export default function App() {
             onOpenCollection={() => setActiveView("collection")}
             onOpenMonitoring={() => setActiveView("monitoring")} />
         ) : activeView === "collection" ? (
-          <CollectionPage jobs={jobs} total={total} page={page} pageSize={PAGE_SIZE}
+          <CollectionPage jobs={jobs} total={total} statusCounts={statusCounts}
+            page={page} pageSize={PAGE_SIZE}
             loading={loading} scoreThreshold={scoreThreshold}
             expanded={expanded} onExpanded={setExpanded} deleting={deleting}
             onRemove={remove} onJobChange={updateJob} onPage={load}
             query={query} onQueryChange={setQuery} statusFilter={statusFilter}
             onStatusFilterChange={setStatusFilter} collection={collection}
             collectionError={collectionError} error={error} thresholdWarning={thresholdWarning}
-            statusReady={statusReady} starting={starting} onStart={startCollection}
-            onRefresh={() => load(page)} />
+            statusReady={statusReady} starting={starting} onStart={startCollection} />
         ) : activeView === "monitoring" ? <MonitoringPage /> : <ConfigurationPage />}
       </div>
     </div>

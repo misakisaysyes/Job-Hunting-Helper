@@ -61,6 +61,88 @@
 }
 .workbench-history-controls input:focus { outline: 2px solid #b8d8f4; border-color: #77abe0; }
 
+.conversion-section { margin-bottom: 34px; }
+.conversion-date-controls { margin-left: auto; }
+.conversion-generate-button {
+  min-height: 36px;
+  padding: 7px 14px;
+  border: 1px solid #1978e6;
+  border-radius: 8px;
+  background: #1978e6;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.conversion-generate-button:hover:not(:disabled) { background: #1269cd; }
+.conversion-generate-button:disabled { cursor: default; opacity: .55; }
+.conversion-card {
+  padding: 22px 26px 18px;
+  border: 1px solid #dce8f5;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 7px 28px #2743650a;
+}
+.conversion-chart-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-bottom: 16px;
+  color: #60728a;
+  font-size: 12px;
+}
+.conversion-chart-meta strong { color: #344860; font-size: 14px; }
+.conversion-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.conversion-metrics > div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 13px 16px;
+  border-radius: 10px;
+  background: #f5f8fc;
+}
+.conversion-metrics span { color: #718197; font-size: 12px; }
+.conversion-metrics strong { color: #253953; font-size: 21px; line-height: 1.1; }
+.conversion-metrics .conversion-rate { background: #eaf7f2; }
+.conversion-metrics .conversion-rate strong { color: #17815f; }
+.conversion-route-summary { margin: 2px 0 10px; color: #526780; font-size: 13px; }
+.conversion-route-summary strong { color: #178f75; font-size: 16px; }
+.conversion-chart-frame { position: relative; }
+.conversion-chart-scroll { overflow-x: auto; }
+.conversion-chart { display: block; min-width: 760px; width: 100%; height: auto; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+.conversion-chart path[pointer-events="stroke"] { cursor: crosshair; }
+.conversion-link-tooltip {
+  position: absolute;
+  z-index: 2;
+  width: 240px;
+  max-width: calc(100% - 16px);
+  padding: 10px 12px;
+  border: 1px solid #d7e3ef;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: 0 8px 24px #263f5d24;
+  color: #344860;
+  font-size: 12px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+.conversion-link-tooltip-route { font-weight: 700; }
+.conversion-link-tooltip-kind, .conversion-link-tooltip-share { color: #718197; }
+.conversion-link-tooltip-value strong { color: #1c719d; font-size: 18px; }
+.conversion-column-title { fill: #8796a9; font-size: 13px; font-weight: 700; }
+.conversion-node-label { fill: #344860; font-size: 12px; font-weight: 650; }
+.conversion-note { margin: 4px 0 0; color: #718197; font-size: 12px; line-height: 1.7; }
+.conversion-message { margin: 24px 0; color: #718197; font-size: 13px; }
+.conversion-message.error { color: #bf433f; }
+
 
 .workbench-journey {
   margin-bottom: 30px;
@@ -444,6 +526,16 @@
   font-size: 11px;
 }
 
+.workbench-settings .workbench-score-note {
+  margin: 0;
+  padding: 9px 11px;
+  border-radius: 7px;
+  background: #edf5ff;
+  color: #35618f;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .workbench-settings-footer {
   display: flex;
   justify-content: space-between;
@@ -539,6 +631,7 @@
 .workbench-batch-preview-hint { margin: 10px 0 0; color: #7b899b; font-size: 12px; }
 
 @media (max-width: 1050px) {
+  .conversion-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .workbench-task-grid,
   .workbench-run-grid { grid-template-columns: 1fr; }
   .workbench-journey-stages { grid-template-columns: 1fr; gap: 15px; }
@@ -548,6 +641,9 @@
 }
 
 @media (max-width: 500px) {
+  .conversion-card { padding: 16px; }
+  .conversion-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .conversion-date-controls { width: 100%; margin-left: 0; }
   .workbench-task-card { padding: 19px; }
   .workbench-card-top { flex-direction: column; }
   .workbench-journey { padding: 20px; }

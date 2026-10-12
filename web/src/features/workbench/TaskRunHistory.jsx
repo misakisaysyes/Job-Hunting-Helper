@@ -15,7 +15,6 @@ export default function TaskRunHistory() {
   const [latestDate, setLatestDate] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [version, setVersion] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -30,19 +29,18 @@ export default function TaskRunHistory() {
         setData(result);
         setLatestDate(result.latest_date);
         setError("");
-        if (["collection", "monitoring", "monitoring_followup", "monitoring_delete"].some((type) =>
-          result[type]?.history.some((run) => run.status === "running"))) {
-          timer = window.setTimeout(refresh, 3000);
-        }
       } catch (cause) {
         if (active) setError(cause.message || "无法读取历史任务记录");
       } finally {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+          timer = window.setTimeout(refresh, 3000);
+        }
       }
     }
     void refresh();
     return () => { active = false; window.clearTimeout(timer); };
-  }, [selectedDate, version]);
+  }, [selectedDate]);
 
   const shownDate = selectedDate || data?.date || "";
   return <section className="workbench-section workbench-history" aria-labelledby="task-history-title">
@@ -60,8 +58,6 @@ export default function TaskRunHistory() {
         <button type="button" className="toolbar-button"
           disabled={loading || !shownDate || shownDate >= latestDate}
           onClick={() => setSelectedDate(shiftDate(shownDate, 1))}>后一天</button>
-        <button type="button" className="toolbar-button" disabled={loading}
-          onClick={() => setVersion((value) => value + 1)}>{loading ? "加载中…" : "刷新记录"}</button>
       </div>
     </div>
     {error && <p className="workbench-settings-notice error" role="alert">{error}</p>}

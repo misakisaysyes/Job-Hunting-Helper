@@ -8,7 +8,9 @@ import sqlite3
 
 from api.jobs import JobActionError
 from browser.browser import ChromeBrowser
+from browser.boss_filter import delete_exchanged_conversation as delete_boss_exchange
 from data.conversation_store import ConversationStore
+from data.exchange_store import ExchangeStore
 from data.filter_store import FilterStore
 
 
@@ -45,6 +47,34 @@ def open_filter_candidate(db_path: Path, config: dict, platform: str,
     if candidate is None:
         raise JobActionError("过滤候选不存在", 404)
     return _show_boss_chat(config, conversation_id, "新招呼")
+
+
+def open_exchanged_conversation(db_path: Path, config: dict, platform: str,
+                                conversation_id: str) -> dict:
+    if platform != "boss":
+        raise JobActionError("当前仅支持 BOSS 会话", 400)
+    with closing(sqlite3.connect(db_path, timeout=10)) as conn:
+        conversation = ExchangeStore(conn).get_conversation(platform, conversation_id)
+    if conversation is None:
+        raise JobActionError("有交换会话记录不存在", 404)
+    return _show_boss_chat(config, conversation_id, "有交换", open_chat=True)
+
+
+def delete_exchanged_conversation(db_path: Path, cdp_url: str,
+                                  platform: str, conversation_id: str) -> dict:
+    if platform != "boss":
+        raise JobActionError("当前仅支持 BOSS 会话", 400)
+    with closing(sqlite3.connect(db_path, timeout=10)) as conn:
+        conversation = ExchangeStore(conn).get_conversation(platform, conversation_id)
+    if conversation is None:
+        raise JobActionError("有交换会话记录不存在", 404)
+    result = delete_boss_exchange(cdp_url, conversation)
+    if not result.verified:
+        raise JobActionError(result.message, 409 if result.uncertain else 502)
+    with closing(sqlite3.connect(db_path, timeout=10)) as conn:
+        if not ExchangeStore(conn).mark_removed(platform, conversation_id):
+            raise JobActionError("BOSS 会话已删除，但本地状态未能更新，请重新扫描", 500)
+    return {"deleted": True, "message": result.message}
 
 
 def terminate_monitoring(db_path: Path, platform: str, conversation_id: str) -> dict:

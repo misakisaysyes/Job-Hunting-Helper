@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 from pathlib import Path
+import sqlite3
 from tempfile import TemporaryDirectory
 from threading import Event
 import unittest
@@ -11,6 +12,7 @@ from api.followups import FollowupSkipped
 from api.jobs import JobActionError
 from api.monitoring_batch import MonitoringBatchRun
 from api.server import make_handler
+from data.conversation_store import ConversationStore
 from data.task_run_store import LOCAL_ZONE, TaskAlreadyRunning, TaskRunStore
 
 
@@ -93,6 +95,27 @@ class MonitoringBatchTests(unittest.TestCase):
         self.assertIn("成功 2，跳过 1，失败 0", result["message"])
         self.assertIn("跳过会话 2：「仅沟通」中未找到目标会话", result["message"])
 
+    def test_empty_followup_fails_that_conversation_and_continues(self):
+        with sqlite3.connect(self.path) as conn:
+            store = ConversationStore(conn)
+            store.upsert({"platform": "boss", "conversation_id": "1", "judgment": "unread"}, [
+                {"message_id": "100", "sender": "self", "text": "原招呼语", "delivery_status": "1"}])
+            self.assertTrue(store.prepare_followup("boss", "1", "原招呼语", "100"))
+        empty = {**followup_item("1"), "text": " "}
+        state, args = self.queued("followup", [empty, followup_item("2")])
+        with patch("api.monitoring_batch.send_followup", return_value={}) as send:
+            self.runner._execute(*args)
+        result = self.runner.get(state["run_id"])
+        self.assertEqual(result["status"], "completed_with_shortage")
+        self.assertEqual(result["counts"],
+            {"total": 2, "completed": 1, "processed": 2, "failed": 1, "skipped": 0})
+        self.assertEqual([call.args[3] for call in send.call_args_list], ["2"])
+        self.assertIn("会话 1：追问语为空，未发送", result["message"])
+        with sqlite3.connect(self.path) as conn:
+            store = ConversationStore(conn)
+            self.assertEqual(store.get_conversation("boss", "1")["followup_status"], "draft_failed")
+            self.assertTrue(store.prepare_followup("boss", "1", "新的追问语", "100"))
+
     def test_all_missing_targets_complete_with_each_skip_reason_in_history(self):
         state, args = self.queued("followup", [followup_item(str(i)) for i in (1, 2)])
         with patch("api.monitoring_batch.send_followup",
@@ -170,7 +193,7 @@ class MonitoringBatchTests(unittest.TestCase):
         valid = followup_item("1")
         invalid = [
             ([], [valid]), ("other", [valid]), ("followup", []),
-            ("followup", [valid] * 2), ("followup", [{**valid, "text": " "}]),
+            ("followup", [valid] * 2),
             ("followup", [{**valid, "text": "字" * 301}]),
             ("followup", [{**valid, "anchor_id": ""}]),
             ("followup", [{**valid, "expected_text": None}]),

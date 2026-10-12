@@ -1,17 +1,24 @@
 """Only unanswered outbound conversations are monitored."""
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
 import unittest
 from copy import deepcopy
 from unittest.mock import MagicMock, patch
 from contextlib import closing
+from threading import Event
 
-from browser.boss_monitor import scan_recent_conversations
+from browser.boss_monitor import CHAT_URL, _tab_friends, scan_exchanged_conversations, scan_new_greetings, scan_recent_conversations
 from browser.browser import ChromeBrowser
-from api.conversations import delete_conversation_record, open_conversation, open_filter_candidate, terminate_monitoring
+from browser.boss_filter import FilterDeleteResult
+from api.conversations import (delete_conversation_record, delete_exchanged_conversation,
+                               open_conversation, open_exchanged_conversation,
+                               open_filter_candidate, terminate_monitoring)
 from api.jobs import JobActionError
 from api.monitoring import MonitoringRun
+from api.server import make_handler
 from data.conversation_store import ConversationStore
+from data.exchange_store import ExchangeStore
 from data.filter_store import FilterStore
 from data.job_store import JobStore
 from config import MONITORING_CONFIG
@@ -172,6 +179,63 @@ class MonitoringBackendTests(unittest.TestCase):
         self.assertTrue(all("hr_reply_status" not in row for row in rows))
         self.assertEqual(history.call_count, 2)
 
+    def test_exchanged_tab_opens_more_before_selecting_exchange(self) -> None:
+        page = MagicMock()
+        page.url = CHAT_URL
+        page.evaluate.return_value = []
+        clicks = []
+        page.locator.return_value.filter.return_value.first.click.side_effect = lambda **_: clicks.append("更多")
+        page.get_by_text.return_value.click.side_effect = lambda **_: clicks.append("有交换")
+        self.assertEqual(_tab_friends(page, "有交换", None), [])
+        self.assertEqual(clicks, ["更多", "有交换"])
+        page.get_by_text.assert_called_once_with("有交换", exact=True)
+
+    def test_exchange_scan_reads_list_without_chat_history(self) -> None:
+        friend = {"uid": "123", "brandName": "甲公司", "name": "张先生",
+                  "sourceTitle": "前端工程师", "encryptJobId": "job-a", "lastTS": 1234567890}
+        with patch("browser.boss_monitor.ChromeBrowser") as browser, \
+                patch("browser.boss_monitor._tab_friends", return_value=[friend]) as list_friends, \
+                patch("browser.boss_monitor._fetch_history", side_effect=AssertionError("不应读取聊天记录")):
+            browser.return_value.new_tab.return_value = "tab"
+            rows = scan_exchanged_conversations("cdp", active_days=3)
+        list_friends.assert_called_once_with(browser.return_value.page.return_value,
+                                             "有交换", 3, None)
+        self.assertEqual(rows[0]["source_job_id"], "job-a")
+        self.assertEqual(rows[0]["conversation_id"], "123")
+
+    def test_new_greeting_scan_passes_its_own_activity_window(self) -> None:
+        friend = {"uid": "123", "avatar": "https://example.invalid/a.png",
+                  "brandName": "甲公司", "name": "张先生"}
+        with patch("browser.boss_monitor.ChromeBrowser") as browser, \
+                patch("browser.boss_monitor._tab_friends", return_value=[friend]) as list_friends:
+            browser.return_value.new_tab.return_value = "tab"
+            rows = scan_new_greetings("cdp", active_days=9)
+        list_friends.assert_called_once_with(browser.return_value.page.return_value,
+                                             "新招呼", 9, None)
+        self.assertEqual([row["conversation_id"] for row in rows], ["123"])
+
+    def test_exchange_and_new_greeting_windows_filter_old_list_activity(self) -> None:
+        now = datetime.now(timezone.utc)
+        friends = [
+            {"uid": "new", "avatar": "https://example.invalid/new.png",
+             "lastTS": int((now - timedelta(days=2)).timestamp() * 1000)},
+            {"uid": "old", "avatar": "https://example.invalid/old.png",
+             "lastTS": int((now - timedelta(days=8)).timestamp() * 1000)},
+        ]
+        for tab_label in ("有交换", "新招呼"):
+            with self.subTest(tab=tab_label):
+                page = MagicMock()
+                page.url = CHAT_URL
+                page.on.side_effect = lambda _event, callback: callback(MagicMock(
+                    url="https://www.zhipin.com/wapi/zprelation/friend/getGeekFriendList.json",
+                    json=lambda: {"code": 0, "zpData": {"result": friends}}))
+                page.evaluate.side_effect = lambda expression: (
+                    [{"avatar": row["avatar"], "status": ""} for row in friends]
+                    if "querySelectorAll('.friend-content')" in expression else None)
+                page.locator.return_value.filter.return_value.first.get_attribute.return_value = "selected"
+                rows = _tab_friends(page, tab_label, 4)
+                self.assertEqual([row["uid"] for row in rows], ["new"])
+
     def test_terminated_conversation_is_not_opened_or_reactivated(self) -> None:
         conversation = {"platform": "boss", "conversation_id": "1", "judgment": "unread"}
         self.store.upsert(conversation, [{"message_id": "1", "sender": "self", "text": "你好"}])
@@ -276,6 +340,190 @@ class MonitoringBackendTests(unittest.TestCase):
             self.assertEqual(state["phases"]["communicated"]["status"], "completed")
             self.assertEqual(state["phases"]["new_greetings"]["status"], "completed")
             self.assertEqual(state["counts"]["new_greetings_scanned"], 0)
+
+    def test_start_selects_one_monitoring_phase(self) -> None:
+        with TemporaryDirectory() as directory:
+            run = MonitoringRun(Path(directory) / "state.sqlite")
+            with self.assertRaisesRegex(ValueError, "未知监测任务类型"):
+                run.start("unknown")
+            with patch("api.monitoring.Thread") as thread:
+                state = run.start("new_greetings")
+            self.assertEqual(state["phase"], "new_greetings")
+            self.assertEqual(state["counts"]["phase"], "new_greetings")
+            self.assertEqual(state["phases"]["communicated"]["status"], "not_run")
+            self.assertEqual(state["phases"]["new_greetings"]["status"], "pending")
+            self.assertEqual(thread.call_args.kwargs["args"][-1], "new_greetings")
+
+    def test_exchanged_scan_is_independent_and_keeps_outside_job_outside(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite"
+            item = {"platform": "boss", "conversation_id": "123", "company": "甲公司",
+                    "recruiter": "张先生", "job_title": "前端", "source_job_id": "outside-job",
+                    "last_ts": 1234567890}
+            with patch("api.monitoring.scan_recent_conversations", side_effect=AssertionError("不应扫描仅沟通")), \
+                    patch("api.monitoring.scan_new_greetings", side_effect=AssertionError("不应扫描新招呼")), \
+                    patch("api.monitoring.scan_exchanged_conversations", return_value=[item]) as scan:
+                run = MonitoringRun(path)
+                run._execute({**MONITORING_CONFIG, "exchanged_active_days": 6}, phase="exchanged")
+            self.assertEqual(scan.call_args.kwargs["active_days"], 6)
+            self.assertEqual(run.snapshot()["status"], "completed")
+            self.assertEqual(run.snapshot()["phases"]["exchanged"]["status"], "completed")
+            self.assertEqual(run.snapshot()["phases"]["communicated"]["status"], "not_run")
+            self.assertEqual(run.snapshot()["phases"]["new_greetings"]["status"], "not_run")
+            self.assertEqual(run.counts["exchanged_scanned"], 1)
+            with closing(sqlite3.connect(path)) as conn:
+                rows, total = ExchangeStore(conn).list_conversations(limit=20, offset=0)
+                self.assertEqual((total, rows[0]["in_job_pool"]), (1, 0))
+                self.assertIsNone(JobStore(conn).get_job("boss", "outside-job"))
+                self.assertEqual(ConversationStore(conn).list_conversations(limit=20, offset=0)[1], 0)
+
+    def test_exchange_store_retires_missing_rows_and_preserves_first_seen(self) -> None:
+        store = ExchangeStore(self.conn)
+        item = {"platform": "boss", "conversation_id": "123", "company": "甲公司",
+                "recruiter": "张先生", "job_title": "前端", "source_job_id": "job-a",
+                "last_ts": 1234567890, "in_job_pool": False}
+        self.assertTrue(store.record_scan(item, "first"))
+        first = store.list_conversations(limit=20, offset=0)[0][0]["first_seen_at"]
+        self.assertFalse(store.record_scan({**item, "company": "乙公司"}, "second"))
+        rows, total = store.list_conversations(limit=20, offset=0, query="乙公司")
+        self.assertEqual((total, rows[0]["first_seen_at"]), (1, first))
+        self.assertEqual(store.deactivate_unseen("third"), 1)
+        self.assertEqual(store.list_conversations(limit=20, offset=0)[1], 0)
+
+    def test_exchange_pool_filter_and_verified_boss_delete_keep_local_history(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite"
+            with closing(sqlite3.connect(path)) as conn:
+                JobStore(conn).save({"source_platform": "boss", "source_job_id": "job-a"})
+                store = ExchangeStore(conn)
+                for conversation_id, pool, job_id in (("inside", True, "job-a"),
+                                                      ("outside", False, "job-b")):
+                    store.record_scan({"platform": "boss", "conversation_id": conversation_id,
+                                       "company": "甲公司", "recruiter": "张先生", "job_title": "前端",
+                                       "source_job_id": job_id, "last_ts": 1234567890,
+                                       "in_job_pool": pool}, "scan")
+                inside, inside_total = store.list_conversations(
+                    limit=1, offset=0, pool_status="inside")
+                outside, outside_total = store.list_conversations(
+                    limit=1, offset=0, pool_status="outside", query="甲公司")
+                self.assertEqual((inside_total, inside[0]["conversation_id"]), (1, "inside"))
+                self.assertEqual((outside_total, outside[0]["conversation_id"]), (1, "outside"))
+                self.assertEqual(store.list_conversations(limit=1, offset=1, pool_status="outside")[0], [])
+                with self.assertRaises(ValueError):
+                    store.list_conversations(limit=1, offset=0, pool_status="invalid")
+            with patch("api.conversations._show_boss_chat", return_value={"message": "已打开"}) as show:
+                self.assertEqual(open_exchanged_conversation(
+                    path, {"browser": {"cdp_url": "cdp"}}, "boss", "outside"), {"message": "已打开"})
+                show.assert_called_once_with({"browser": {"cdp_url": "cdp"}}, "outside",
+                                             "有交换", open_chat=True)
+            with patch("api.conversations.delete_boss_exchange", return_value=FilterDeleteResult(
+                    True, False, "已从 BOSS 删除")) as browser_delete:
+                self.assertTrue(delete_exchanged_conversation(
+                    path, "cdp", "boss", "outside")["deleted"])
+            browser_delete.assert_called_once()
+            with closing(sqlite3.connect(path)) as conn:
+                self.assertIsNone(ExchangeStore(conn).get_conversation("boss", "outside"))
+                self.assertEqual(conn.execute("""SELECT COUNT(*) FROM monitored_exchanges
+                    WHERE conversation_id = 'outside'""").fetchone()[0], 1)
+                self.assertIsNotNone(JobStore(conn).get_job("boss", "job-a"))
+            with self.assertRaises(JobActionError):
+                open_exchanged_conversation(path, {"browser": {"cdp_url": "cdp"}}, "boss", "outside")
+
+    def test_exchange_api_filters_opens_and_deletes_boss_conversation(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite"
+            with closing(sqlite3.connect(path)) as conn:
+                ExchangeStore(conn).record_scan({
+                    "platform": "boss", "conversation_id": "123", "company": "甲公司",
+                    "recruiter": "张先生", "job_title": "前端", "source_job_id": "job-a",
+                    "last_ts": 1234567890, "in_job_pool": False,
+                }, "scan")
+            handler_class = make_handler(path, MagicMock(), restart_event=Event(),
+                started_ai_concurrency=1, state_db_overridden=True, server_instance_id="test")
+            handler = object.__new__(handler_class)
+            handler.send_json = MagicMock()
+            handler.read_json = MagicMock(return_value={})
+            handler.path = "/api/exchanged-conversations?limit=20&offset=0&pool_status=outside"
+            handler.do_GET()
+            code, body = handler.send_json.call_args.args
+            self.assertEqual((code, body["total"]), (200, 1))
+            handler.path = "/api/exchanged-conversations?pool_status=invalid"
+            handler.do_GET()
+            self.assertEqual(handler.send_json.call_args.args[0], 400)
+            handler.path = "/api/exchanged-conversations/boss/123/open"
+            with patch("api.conversations._show_boss_chat", return_value={"message": "已打开"}):
+                handler.do_POST()
+            self.assertEqual(handler.send_json.call_args.args, (200, {"message": "已打开"}))
+            handler.path = "/api/exchanged-conversations/boss/123"
+            with patch("api.conversations.delete_boss_exchange", return_value=FilterDeleteResult(
+                    True, False, "已删除")):
+                handler.do_DELETE()
+            self.assertTrue(handler.send_json.call_args.args[1]["deleted"])
+            handler.do_DELETE()
+            self.assertEqual(handler.send_json.call_args.args[0], 404)
+
+    def test_exchange_delete_uncertain_result_keeps_row_visible(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite"
+            with closing(sqlite3.connect(path)) as conn:
+                ExchangeStore(conn).record_scan({
+                    "platform": "boss", "conversation_id": "123", "company": "甲公司",
+                    "recruiter": "张先生", "job_title": "前端", "source_job_id": "job-a",
+                    "last_ts": 1234567890, "in_job_pool": False,
+                }, "scan")
+            with patch("api.conversations.delete_boss_exchange", return_value=FilterDeleteResult(
+                    False, True, "删除结果不明")):
+                with self.assertRaises(JobActionError) as error:
+                    delete_exchanged_conversation(path, "cdp", "boss", "123")
+            self.assertEqual(error.exception.status_code, 409)
+            with closing(sqlite3.connect(path)) as conn:
+                self.assertIsNotNone(ExchangeStore(conn).get_conversation("boss", "123"))
+
+    def test_communicated_scan_does_not_scan_or_retire_new_greetings(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite"
+            with closing(sqlite3.connect(path)) as conn:
+                FilterStore(conn).record_scan(
+                    {"platform": "boss", "conversation_id": "filtered", "company": "屏蔽公司"},
+                    "屏蔽", "previous")
+            conversation = {"platform": "boss", "conversation_id": "communicated",
+                            "source_job_id": "outside-job", "job_title": "工程师",
+                            "company": "普通公司", "judgment": "unread", "messages": []}
+            with patch("api.monitoring.scan_recent_conversations", return_value=[conversation]) as scan, \
+                    patch("api.monitoring.scan_new_greetings", side_effect=AssertionError("不应扫描新招呼")):
+                run = MonitoringRun(path)
+                run._execute(phase="communicated")
+            self.assertEqual(run.snapshot()["status"], "completed")
+            self.assertEqual(run.snapshot()["phases"]["new_greetings"]["status"], "not_run")
+            self.assertEqual(run.counts["phase"], "communicated")
+            self.assertEqual(run.counts["filter_stale"], 0)
+            scan.assert_called_once()
+            with closing(sqlite3.connect(path)) as conn:
+                self.assertEqual(FilterStore(conn).get_candidate("boss", "filtered")["status"], "pending_review")
+                rows, total = ConversationStore(conn).list_conversations(limit=10, offset=0)
+                self.assertEqual((total, rows[0]["in_job_pool"]), (1, False))
+
+    def test_new_greetings_scan_does_not_scan_or_retire_communicated(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite"
+            with closing(sqlite3.connect(path)) as conn:
+                ConversationStore(conn).upsert({"platform": "boss", "conversation_id": "saved",
+                                                "judgment": "unread"}, [], scan_token="previous")
+            with patch("api.monitoring.scan_recent_conversations", side_effect=AssertionError("不应扫描仅沟通")), \
+                    patch("api.monitoring.scan_new_greetings", return_value=[
+                        {"platform": "boss", "conversation_id": "filtered", "company": "屏蔽公司"}]) as scan:
+                run = MonitoringRun(path)
+                run._execute({**MONITORING_CONFIG, "new_greetings_active_days": 9},
+                             blocked_terms=["屏蔽"], phase="new_greetings")
+            self.assertEqual(run.snapshot()["status"], "completed")
+            self.assertEqual(run.snapshot()["phases"]["communicated"]["status"], "not_run")
+            self.assertEqual(run.counts["phase"], "new_greetings")
+            self.assertEqual(run.counts["left_scope"], 0)
+            scan.assert_called_once()
+            self.assertEqual(scan.call_args.kwargs["active_days"], 9)
+            with closing(sqlite3.connect(path)) as conn:
+                self.assertEqual(ConversationStore(conn).list_conversations(limit=10, offset=0)[1], 1)
+                self.assertIsNotNone(FilterStore(conn).get_candidate("boss", "filtered"))
 
     def test_scan_counts_only_first_inserts_and_persists_updates_separately(self) -> None:
         with TemporaryDirectory() as directory:
@@ -457,6 +705,48 @@ class MonitoringBackendTests(unittest.TestCase):
                                  "greeted")
                 self.assertEqual(ConversationStore(conn).list_conversations(
                     limit=10, offset=0)[1], 0)
+
+    def test_monitoring_keeps_identifiable_conversation_outside_pool(self) -> None:
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "state.sqlite3"
+            observation = {"platform": "boss", "conversation_id": "123",
+                           "source_job_id": "job-outside", "job_title": "后端工程师",
+                           "company": "甲公司", "recruiter": "李女士",
+                           "chat_url": "https://www.zhipin.com/web/geek/chat?jobId=456",
+                           "judgment": "unread", "messages": [{
+                               "message_id": "1", "sender": "self", "text": "您好",
+                               "delivery_status": "1", "biz_type": "101",
+                           }]}
+            with patch("api.monitoring.scan_new_greetings", return_value=[]), \
+                    patch("api.monitoring.scan_recent_conversations", return_value=[observation]):
+                run = MonitoringRun(db_path)
+                run._execute()
+                self.assertEqual(run.snapshot()["status"], "completed")
+                self.assertEqual((run.counts["in_job_pool"], run.counts["outside_job_pool"]), (0, 1))
+                with closing(sqlite3.connect(db_path)) as conn:
+                    self.assertIsNone(JobStore(conn).get_job("boss", "job-outside"))
+                    rows, total = ConversationStore(conn).list_conversations(limit=10, offset=0)
+                    self.assertEqual((total, rows[0]["in_job_pool"]), (1, False))
+                run._execute()
+                with closing(sqlite3.connect(db_path)) as conn:
+                    self.assertIsNone(JobStore(conn).get_job("boss", "job-outside"))
+                    rows, total = ConversationStore(conn).list_conversations(limit=10, offset=0)
+                    self.assertEqual((total, rows[0]["in_job_pool"]), (1, False))
+
+    def test_monitoring_keeps_unidentifiable_conversation_outside_pool(self) -> None:
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "state.sqlite3"
+            observation = {"platform": "boss", "conversation_id": "123",
+                           "source_job_id": "", "job_title": "未知岗位",
+                           "company": "甲公司", "judgment": "unread", "messages": []}
+            with patch("api.monitoring.scan_new_greetings", return_value=[]), \
+                    patch("api.monitoring.scan_recent_conversations", return_value=[observation]):
+                run = MonitoringRun(db_path)
+                run._execute()
+            with closing(sqlite3.connect(db_path)) as conn:
+                self.assertEqual(JobStore(conn).list_jobs(limit=10, offset=0)[1], 0)
+                rows, total = ConversationStore(conn).list_conversations(limit=10, offset=0)
+                self.assertEqual((total, rows[0]["in_job_pool"]), (1, False))
 
 
 if __name__ == "__main__":

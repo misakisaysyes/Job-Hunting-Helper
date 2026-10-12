@@ -25,6 +25,7 @@ from api.collection import CollectionRun
 from api.monitoring import MonitoringRun
 from api.monitoring_batch import MonitoringBatchRun
 from api import conversations as conversation_actions
+from api import conversion as conversion_actions
 from api import followups as followup_actions
 from api import filtering as filter_actions
 from api import jobs as job_actions
@@ -32,10 +33,11 @@ from api import tasks as task_actions
 from api.settings import (MAX_RESUME_BYTES, SettingsError, apply_full_settings,
                           read_basic_settings, read_full_settings, save_basic_settings, save_full_settings,
                           save_resume_upload)
-from api.job_search import LIST_STATUSES, SearchSyntaxError, compile_search, matches_list_status
+from api.job_search import LIST_STATUSES, SearchSyntaxError, compile_search, list_status_bucket
 from data.job_store import JobStore
 from data.conversation_store import ConversationStore
 from data.filter_store import FilterStore
+from data.exchange_store import ExchangeStore
 from data.task_run_store import TaskAlreadyRunning, TaskRunStore
 
 
@@ -60,7 +62,8 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
         def log_message(self, format: str, *args: object) -> None:
             if self.command == "GET" and urlsplit(self.path).path in {
                 "/api/collections/current", "/api/monitoring/current",
-                "/api/conversations", "/api/tasks/today", "/api/tasks/history",
+                "/api/conversations", "/api/exchanged-conversations", "/api/tasks/today", "/api/tasks/history",
+                "/api/workbench/conversion", "/api/workbench/conversion/latest",
             }:
                 return
             super().log_message(format, *args)
@@ -148,6 +151,14 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                 self.action_result(lambda: task_actions.get_task_history(
                     task_runs, query.get("date", [""])[0]))
                 return
+            if request.path == "/api/workbench/conversion":
+                query = parse_qs(request.query)
+                self.action_result(lambda: conversion_actions.get_conversion_flow(
+                    db_path, query.get("start", [""])[0], query.get("end", [""])[0]))
+                return
+            if request.path == "/api/workbench/conversion/latest":
+                self.action_result(lambda: {"snapshot": conversion_actions.get_saved_conversion_flow(db_path)})
+                return
             if request.path == "/api/collections/current":
                 self.send_json(200, collection.snapshot())
                 return
@@ -183,6 +194,32 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                             followup_status=followup_status)
                 except sqlite3.Error:
                     self.send_json(500, {"error": "读取会话数据失败"})
+                    return
+                self.send_json(200, {"conversations": rows, "total": total,
+                                     "limit": limit, "offset": offset})
+                return
+            if request.path == "/api/exchanged-conversations":
+                query = parse_qs(request.query)
+                try:
+                    limit = int(query.get("limit", ["20"])[0])
+                    offset = int(query.get("offset", ["0"])[0])
+                except ValueError:
+                    self.send_json(400, {"error": "limit 和 offset 必须是整数"})
+                    return
+                if not 1 <= limit <= 100 or offset < 0:
+                    self.send_json(400, {"error": "limit 须在 1～100，offset 不能为负数"})
+                    return
+                pool_status = query.get("pool_status", [""])[0]
+                if pool_status not in {"", "inside", "outside"}:
+                    self.send_json(400, {"error": "未知岗位池筛选状态"})
+                    return
+                try:
+                    with closing(sqlite3.connect(db_path, timeout=10)) as conn:
+                        rows, total = ExchangeStore(conn).list_conversations(
+                            limit=limit, offset=offset, query=query.get("query", [""])[0],
+                            pool_status=pool_status)
+                except sqlite3.Error:
+                    self.send_json(500, {"error": "读取有交换会话失败"})
                     return
                 self.send_json(200, {"conversations": rows, "total": total,
                                      "limit": limit, "offset": offset})
@@ -234,18 +271,16 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                 try:
                     with closing(sqlite3.connect(db_path, timeout=10)) as conn:
                         store = JobStore(conn, score_threshold=DEFAULT_CONFIG["ai"]["score_threshold"])
-                        if expression.strip() or status:
-                            jobs, total = store.search_jobs(
-                                limit=limit, offset=offset,
-                                matches=lambda job: matches_list_status(job, status) and predicate(job),
-                            )
-                        else:
-                            jobs, total = store.list_jobs(limit=limit, offset=offset)
+                        jobs, total, status_counts = store.search_jobs_with_counts(
+                            limit=limit, offset=offset, matches=predicate,
+                            bucket_for=list_status_bucket, selected_bucket=status,
+                        )
                 except (sqlite3.Error, ValueError, TypeError):
                     self.send_json(500, {"error": "读取岗位数据失败"})
                     return
                 self.send_json(200, {
-                    "jobs": jobs, "total": total, "limit": limit, "offset": offset,
+                    "jobs": jobs, "total": total, "status_counts": status_counts,
+                    "limit": limit, "offset": offset,
                     "score_threshold": DEFAULT_CONFIG["ai"]["score_threshold"],
                 })
                 return
@@ -316,6 +351,13 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
             if restart_event.is_set():
                 self.send_json(503, {"error": "服务正在重启，请稍后重试"})
                 return
+            if path == "/api/workbench/conversion":
+                body = self.read_json()
+                if body is None:
+                    return
+                self.action_result(lambda: conversion_actions.generate_and_save_conversion_flow(
+                    db_path, body.get("start"), body.get("end")))
+                return
             if path == "/api/settings/resume":
                 if self.headers.get("Content-Type", "").split(";", 1)[0].strip() != "text/markdown":
                     self.send_json(415, {"error": "请上传 .md 格式的简历"})
@@ -358,14 +400,15 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                 self.send_json(202, state)
                 return
             if path == "/api/monitoring":
-                if self.read_json() is None:
+                body = self.read_json()
+                if body is None:
                     return
                 try:
                     with lifecycle_lock:
                         if restart_event.is_set():
                             self.send_json(503, {"error": "服务正在重启，请稍后重试"})
                             return
-                        state = monitoring.start()
+                        state = monitoring.start(body.get("phase", "all"))
                 except TaskAlreadyRunning as exc:
                     self.send_json(409, {"error": str(exc)})
                     return
@@ -463,6 +506,16 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                 self.action_result(lambda: conversation_actions.open_filter_candidate(
                     db_path, DEFAULT_CONFIG, platform, conversation_id))
                 return
+            if len(parts) == 6 and parts[:3] == ["", "api", "exchanged-conversations"] and parts[5] == "open":
+                if self.read_json() is None:
+                    return
+                platform, conversation_id = unquote(parts[3]), unquote(parts[4])
+                if not platform or not conversation_id or "/" in platform or "/" in conversation_id:
+                    self.send_json(400, {"error": "缺少平台或会话 ID"})
+                    return
+                self.action_result(lambda: conversation_actions.open_exchanged_conversation(
+                    db_path, DEFAULT_CONFIG, platform, conversation_id))
+                return
             route = self.job_action_route()
             if route is None:
                 self.send_json(404, {"error": "接口不存在"})
@@ -541,7 +594,8 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
             request = urlsplit(self.path)
             parts = request.path.split("/")
             if len(parts) == 5 and parts[:3] in (
-                    ["", "api", "conversations"], ["", "api", "filter-candidates"]):
+                    ["", "api", "conversations"], ["", "api", "filter-candidates"],
+                    ["", "api", "exchanged-conversations"]):
                 platform, conversation_id = (unquote(part) for part in parts[3:])
                 if not platform or not conversation_id or "/" in platform or "/" in conversation_id:
                     self.send_json(400, {"error": "缺少平台或会话 ID"})
@@ -549,6 +603,9 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                 if parts[2] == "conversations":
                     self.action_result(lambda: conversation_actions.delete_conversation_record(
                         db_path, platform, conversation_id))
+                elif parts[2] == "exchanged-conversations":
+                    self.action_result(lambda: conversation_actions.delete_exchanged_conversation(
+                        db_path, DEFAULT_CONFIG["browser"]["cdp_url"], platform, conversation_id))
                 else:
                     self.action_result(lambda: filter_actions.delete_filter_record(
                         db_path, platform, conversation_id))

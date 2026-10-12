@@ -40,12 +40,18 @@ export const FIELD_LABELS = {
   monitoring: {
     message_limit: "每条会话消息数",
     followup_enabled: "启用追问", followup_days: "扫描最近活动天数",
+    followup_valid_days: "追问有效期（天）",
+    exchanged_active_days: "扫描最近活动天数",
+    new_greetings_active_days: "扫描最近活动天数",
     followup_unread: "追问未读招呼", followup_read_no_reply: "追问已读未回招呼",
     followup_cooldown_hours: "追问冷却时长（小时）",
     followup_max_count: "每条会话最多追问次数",
     filter_review_required: "删除前人工审核",
   },
 };
+
+export const DISABLED_AI_SCORE_NOTICE =
+  "关闭 AI 评分后，预筛通过的岗位按 100 分处理并直接进入「打招呼」；岗位列表显示「100 分 · 预筛已评分」，与 AI 评分区分。";
 
 export const FIELD_HELP = {
   "collection.encrypt_expect_id": "推荐流必填；输入 ID 后按空格添加。搜索流须留空。",
@@ -71,6 +77,9 @@ export const FIELD_HELP = {
   "ai.ai_api_concurrency": "线程池在服务启动时建立；点击生效配置后会自动重启 API 服务。",
   "safety.state_db": "点击生效配置后会自动重启 API 服务并使用新数据库。",
   "monitoring.followup_days": "只扫描「仅沟通」中最近 X 天有活动的会话。",
+  "monitoring.followup_valid_days": "从会话首次入库时间起算；超过设置天数后不可追问，即使最近仍有活动。范围 1～365 天。",
+  "monitoring.exchanged_active_days": "只读取 BOSS「有交换」列表中最近 X 天有活动的会话；范围 1～30 天。",
+  "monitoring.new_greetings_active_days": "只读取 BOSS「新招呼」列表中最近 X 天有活动的会话；范围 1～30 天。",
   "monitoring.followup_types": "可多选未读、已读未回；不选则不生成追问。",
   "monitoring.followup_cooldown_hours": "第一次从招呼语发送时间起算，以后从上次追问发送时间起算。",
   "monitoring.filter_review_required": "「新招呼」公司名命中岗位预筛中的公司排除词时生成删除候选。关闭审核后会自动删除；扫描不会打开会话。",

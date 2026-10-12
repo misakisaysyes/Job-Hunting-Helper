@@ -30,7 +30,7 @@ export async function executeRecordedMonitoringBatch(items, action, onState, api
   while (state.status === "running") {
     await api.wait();
     state = await api.read(runId);
-    if (state.run_id !== runId) throw new Error("批量任务编号已变化，请刷新查看任务记录。");
+    if (state.run_id !== runId) throw new Error("批量任务编号已变化，请查看任务记录。");
     onState(state);
   }
   return state;

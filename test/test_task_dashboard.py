@@ -109,6 +109,30 @@ class FullSettingsTests(unittest.TestCase):
 
 
 class TaskRunStoreTests(unittest.TestCase):
+    def test_individual_monitoring_phase_is_recorded_without_polluting_daily_totals(self):
+        with TemporaryDirectory() as temp:
+            store = TaskRunStore(Path(temp) / "tasks.sqlite3")
+            run_id = store.start("monitoring", "2026-10-10T00:00:00+00:00", "扫描仅沟通",
+                                 counts={"phase": "communicated", "scanned": 2})
+            store.finish(run_id, "completed", "仅沟通完成",
+                         {"phase": "communicated", "scanned": 2}, "2026-10-10T00:01:00+00:00")
+            bucket = store.for_date(date(2026, 10, 10))["monitoring"]
+            self.assertEqual(bucket["history"][0]["counts"]["phase"], "communicated")
+            self.assertEqual(bucket["totals"]["scanned"], 2)
+            self.assertNotIn("phase", bucket["totals"])
+
+    def test_exchange_totals_count_new_runs_alongside_older_runs(self):
+        with TemporaryDirectory() as temp:
+            store = TaskRunStore(Path(temp) / "tasks.sqlite3")
+            old = store.start("monitoring", "2026-10-10T00:00:00+00:00", "旧扫描")
+            store.finish(old, "completed", "旧扫描完成", {"scanned": 2},
+                         "2026-10-10T00:01:00+00:00")
+            exchange = store.start("monitoring", "2026-10-10T00:02:00+00:00", "有交换")
+            store.finish(exchange, "completed", "有交换完成",
+                         {"phase": "exchanged", "exchanged_scanned": 5, "exchanged_new": 3},
+                         "2026-10-10T00:03:00+00:00")
+            self.assertEqual(store.for_date(date(2026, 10, 10))["monitoring"]["totals"]["exchanged_new"], 3)
+
     def test_legacy_scans_do_not_create_incomplete_daily_new_counts(self):
         with TemporaryDirectory() as temp:
             store = TaskRunStore(Path(temp) / "tasks.sqlite3")
@@ -148,7 +172,8 @@ class TaskRunStoreTests(unittest.TestCase):
             self.assertEqual(summary["collection"]["runs"], 2)
             self.assertEqual(summary["collection"]["totals"], {"seen": 7, "new": 3, "greeted": 2})
             self.assertEqual(summary["monitoring"]["totals"],
-                             {"scanned": 5, "saved": 4, "communicated_new": None, "filter_new": None})
+                             {"scanned": 5, "saved": 4, "communicated_new": None,
+                              "exchanged_new": None, "filter_new": None})
             self.assertEqual(summary["collection"]["history"][0]["started_at"], "2026-10-09T15:59:59+00:00")
             self.assertEqual(summary["collection"]["history"][0]["finished_at"], "2026-10-09T16:05:00+00:00")
 

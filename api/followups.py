@@ -37,6 +37,23 @@ def _message_time(value: object) -> datetime | None:
         return None
 
 
+def _admission_expiry_reason(conversation: dict[str, Any], valid_days: int | None,
+                             now: datetime) -> str:
+    """Use the first local admission, never the latest scan or chat activity."""
+    first_seen = conversation.get("first_seen_at")
+    if valid_days is None or not first_seen:
+        return ""
+    try:
+        admitted = datetime.fromisoformat(str(first_seen).replace("Z", "+00:00"))
+        if admitted.tzinfo is None:
+            return "无法确认会话入库时间，不能追问"
+    except (TypeError, ValueError):
+        return "无法确认会话入库时间，不能追问"
+    if now > admitted + timedelta(days=valid_days):
+        return f"入库已超过 {valid_days} 天追问有效期"
+    return ""
+
+
 def proposal(conversation: dict[str, Any], messages: list[dict[str, Any]],
              job: dict[str, Any] | None, config: dict, *,
              now: datetime | None = None) -> tuple[str, str, int] | None:
@@ -58,6 +75,10 @@ def proposal_with_reason(conversation: dict[str, Any], messages: list[dict[str, 
         return None, "未开启对已读未回会话的追问"
     if judgment not in {"unread", "read_no_reply"}:
         return None, "当前会话状态不支持追问"
+    expiry_reason = _admission_expiry_reason(
+        conversation, config.get("followup_valid_days"), now or datetime.now(timezone.utc))
+    if expiry_reason:
+        return None, expiry_reason
     status = conversation.get("followup_status")
     if status == "pending_review":
         return None, "追问语已生成，等待发送"
@@ -152,36 +173,63 @@ def annotate_followup_availability(conn: sqlite3.Connection, conversations: list
                 if now <= deadline:
                     cooldown_until = deadline
         pending = conversation.get("followup_status") == "pending_review"
-        if pending and not str(conversation.get("followup_text") or "").strip():
+        if "追问有效期" in reason or reason == "无法确认会话入库时间，不能追问":
+            pass
+        elif pending and int(conversation.get("followup_count") or 0) >= config["followup_max_count"]:
+            reason = f"已达到最多追问 {config['followup_max_count']} 次的上限"
+        elif pending and not str(conversation.get("followup_text") or "").strip():
             reason = "追问草稿为空，请重新运行监测"
         elif pending and not str(conversation.get("followup_anchor_id") or "").isdigit():
             reason = "追问所依据的消息编号无效，请重新运行监测"
-        elif pending and int(conversation.get("followup_count") or 0) >= config["followup_max_count"]:
-            reason = f"已达到最多追问 {config['followup_max_count']} 次的上限"
         elif pending and reason == "追问语已生成，等待发送":
             reason = cooldown_reason if cooldown_until else ""
+        elif not pending and conversation.get("followup_status") == "draft_failed":
+            reason = conversation.get("followup_error") or "追问语为空，未发送"
         elif not pending and not reason:
             reason = "已满足追问条件，请重新运行监测生成追问语"
         conversation["followup_eligible"] = pending and not reason
         conversation["followup_reason"] = reason
         conversation["followup_cooldown_until"] = cooldown_until.isoformat() if cooldown_until else ""
+        raw_status = conversation.get("followup_status")
+        if raw_status in {"failed", "draft_failed", "unknown", "skipped"}:
+            display_status = "incomplete"
+        elif raw_status == "sending":
+            display_status = "sending"
+        elif "上限" in reason:
+            display_status = "unavailable"
+        elif "已超过最近" in reason or "追问有效期" in reason:
+            display_status = "unavailable"
+        elif cooldown_until:
+            display_status = "unavailable"
+        elif conversation["followup_eligible"]:
+            display_status = "available"
+        elif reason in {"已满足追问条件，请重新运行监测生成追问语", "追问草稿为空，请重新运行监测"}:
+            display_status = "available"
+        else:
+            display_status = "unavailable"
+        conversation["followup_display_status"] = display_status
+        conversation["followup_unavailable_cause"] = (
+            "超追问上限" if "上限" in reason else
+            "过期" if "已超过最近" in reason or "追问有效期" in reason else
+            "冷冻" if cooldown_until else
+            "条件不满足") if display_status == "unavailable" else ""
 
 
 def list_conversations(conn: sqlite3.Connection, config: dict, *, limit: int, offset: int,
                        query: str = "", conversation_status: str = "",
                        followup_status: str = "", now: datetime | None = None) -> tuple[list[dict], int]:
-    """Filter computed availability before pagination, using the send rules."""
-    availability_filter = followup_status in {"available", "cooling"}
+    """Filter the status shown in the list before pagination."""
+    display_filter = followup_status in {
+        "available", "unavailable", "sending", "incomplete",
+    }
     rows, total = ConversationStore(conn).list_conversations(
-        limit=-1 if availability_filter else limit,
-        offset=0 if availability_filter else offset, query=query,
+        limit=-1 if display_filter else limit,
+        offset=0 if display_filter else offset, query=query,
         conversation_status=conversation_status,
-        followup_status="" if availability_filter else followup_status)
+        followup_status="" if display_filter else followup_status)
     annotate_followup_availability(conn, rows, config, now=now)
-    if availability_filter:
-        rows = [row for row in rows if (
-            bool(row["followup_cooldown_until"]) if followup_status == "cooling"
-            else row["followup_eligible"] and not row["followup_cooldown_until"])]
+    if display_filter:
+        rows = [row for row in rows if row["followup_display_status"] == followup_status]
         total = len(rows)
         rows = rows[offset:offset + limit]
     return rows, total
@@ -244,6 +292,7 @@ def generate_followup(db_path: Path, config: dict, scheduler: AITaskScheduler,
 
 def send_followup(db_path: Path, cdp_url: str, platform: str,
                   conversation_id: str, *, max_count: int | None = None,
+                  valid_days: int | None = None,
                   text: object = None, anchor_id: str | None = None,
                   expected_text: str | None = None) -> dict:
     if platform != "boss":
@@ -252,6 +301,13 @@ def send_followup(db_path: Path, cdp_url: str, platform: str,
         text = _followup_text(text)
     with closing(sqlite3.connect(db_path, timeout=10)) as conn:
         store = ConversationStore(conn)
+        current = store.get_conversation(platform, conversation_id)
+        if current is not None:
+            expiry_reason = _admission_expiry_reason(
+                current, valid_days if valid_days is not None
+                else MONITORING_CONFIG["followup_valid_days"], datetime.now(timezone.utc))
+            if expiry_reason:
+                raise JobActionError(expiry_reason, 409)
         claimed = store.claim_followup(platform, conversation_id,
                                       max_count if max_count is not None
                                       else MONITORING_CONFIG["followup_max_count"],

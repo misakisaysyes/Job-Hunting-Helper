@@ -12,16 +12,26 @@ const CONVERSATION_STATUS_LABELS = {
   read_no_reply: "已读未回",
 };
 
-export default function ConversationList({ conversations, total, page, pageSize, loading, onPage, onRefresh, expanded, onExpanded, renderDetails, onDelete, busyAction, busyDelete, filtered, batch, onBatchModeChange }) {
+function unavailableFollowupInfo(conversation) {
+  const reason = conversation.followup_reason || "当前没有可发送的追问语";
+  const status = conversation.followup_display_status;
+  const outcome = conversation.followup_status;
+  const detail = status === "incomplete"
+    ? `${outcome === "unknown" ? "结果待确认" : outcome === "skipped" ? "已跳过" : "追问失败"}：${conversation.followup_error || reason}`
+    : reason;
+  return { label: status === "unavailable"
+    ? `不可追问（${conversation.followup_unavailable_cause || "条件不满足"}）`
+    : status === "incomplete" ? "追问未完成" : status === "sending" ? "发送中" : "不可追问（条件不满足）",
+    className: "unavailable", reason: detail };
+}
+
+export default function ConversationList({ conversations, total, page, pageSize, loading, onPage, expanded, onExpanded, renderDetails, onDelete, busyAction, busyDelete, filtered, batch, onBatchModeChange }) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min(total, (page + 1) * pageSize);
   return (
     <section className="panel" aria-label="「仅沟通」会话列表">
       <div className="panel-head"><span>会话列表</span><span className="range">{total ? `${start}–${end} / ${total}` : "暂无记录"}</span></div>
       <div className="monitoring-batch-toolbar"><button type="button" className="toolbar-button"
-        disabled={loading || Boolean(batch.busy) || Boolean(busyAction)} onClick={onRefresh}>
-        {loading ? "刷新中…" : "刷新列表"}
-      </button><button type="button" className="toolbar-button"
         disabled={loading || Boolean(batch.busy) || Boolean(busyAction)}
         onClick={() => onBatchModeChange(!batch.batchMode)}>
         {batch.batchMode ? "退出批量操作" : "批量操作"}
@@ -47,6 +57,7 @@ export default function ConversationList({ conversations, total, page, pageSize,
             </tr></thead>
             <tbody>{conversations.map((conversation) => {
               const key = monitoringKey(conversation);
+              const unavailable = unavailableFollowupInfo(conversation);
               return <Fragment key={key}><tr>
                 {batch.batchMode && <td className="select-cell"><input type="checkbox"
                   aria-label={`选择会话 ${conversation.company || conversation.recruiter || conversation.conversation_id}`}
@@ -59,12 +70,13 @@ export default function ConversationList({ conversations, total, page, pageSize,
                 </td>
                 <td>{CONVERSATION_STATUS_LABELS[conversation.conversation_status || conversation.judgment] || display(conversation.conversation_status || conversation.judgment)}</td>
                 <td className="followup-availability-cell">
-                  {conversation.followup_cooldown_until ? <>
-                    <span className="followup-availability cooling">冷冻中</span>
-                    <small>预计 {formatTime(conversation.followup_cooldown_until)} 解冻</small>
-                  </> : conversation.followup_eligible
-                    ? <span className="followup-availability available">可追问</span>
-                    : <span title={conversation.followup_reason || undefined}>—</span>}
+                  {conversation.followup_display_status === "available"
+                    ? <><span className="followup-availability available">可追问</span>
+                      {!conversation.followup_eligible && <small>待生成追问语</small>}</>
+                    : <><span className={`followup-availability ${unavailable.className}`}>{unavailable.label}</span>
+                      <small>{conversation.followup_unavailable_cause === "冷冻" && conversation.followup_cooldown_until
+                        ? `预计 ${formatTime(conversation.followup_cooldown_until)} 解冻`
+                        : unavailable.reason}</small></>}
                 </td>
                 <td className="date-cell">
                   <div className="time-block"><span>入库时间</span><time dateTime={conversation.first_seen_at || undefined}>{formatTime(conversation.first_seen_at)}</time></div>

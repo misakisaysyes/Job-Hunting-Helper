@@ -47,6 +47,25 @@ class WorkbenchSettingsTests(unittest.TestCase):
         self.assertFalse(self.path.exists())
         self.assertEqual(DEFAULT_CONFIG["collection"], self.saved_default["collection"])
 
+    def test_followup_valid_days_can_be_saved_with_bounds(self):
+        result = save_full_settings({"monitoring": {"followup_valid_days": 14}})
+        self.assertEqual(result["settings"]["monitoring"]["followup_valid_days"], 14)
+        self.assertEqual(json.loads(self.path.read_text())["monitoring"]["followup_valid_days"], 14)
+        for invalid in (0, 366):
+            with self.subTest(invalid=invalid), self.assertRaises(SettingsError):
+                save_full_settings({"monitoring": {"followup_valid_days": invalid}})
+
+    def test_exchange_and_new_greeting_activity_days_are_independent(self):
+        result = save_full_settings({"monitoring": {
+            "exchanged_active_days": 6, "new_greetings_active_days": 12,
+        }})
+        self.assertEqual(result["settings"]["monitoring"]["exchanged_active_days"], 6)
+        self.assertEqual(result["settings"]["monitoring"]["new_greetings_active_days"], 12)
+        for field in ("exchanged_active_days", "new_greetings_active_days"):
+            for invalid in (0, 31):
+                with self.subTest(field=field, invalid=invalid), self.assertRaises(SettingsError):
+                    save_full_settings({"monitoring": {field: invalid}})
+
     def test_basic_settings_disabling_scoring_preserves_greeting_switch(self):
         DEFAULT_CONFIG["ai"].update(use_ai_score=True, use_ai_greeting=True)
         result = save_basic_settings({"ai": {"use_ai_score": False}})

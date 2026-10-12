@@ -151,4 +151,7 @@ class TaskRunStore:
         for metric in ("communicated_new", "filter_new"):
             if any(metric not in run["counts"] for run in result["monitoring"]["history"]):
                 result["monitoring"]["totals"][metric] = None
+        if result["monitoring"]["history"] and not any(
+                "exchanged_new" in run["counts"] for run in result["monitoring"]["history"]):
+            result["monitoring"]["totals"]["exchanged_new"] = None
         return result

@@ -1,14 +1,17 @@
 """Run confirmed monitoring batches and persist their verified progress."""
 
 from copy import deepcopy
+from contextlib import closing
 from datetime import datetime, timezone
 from pathlib import Path
+import sqlite3
 from threading import Thread
 
 from api.filtering import delete_candidate
 from api.followups import FollowupSkipped, send_followup
 from api.jobs import JobActionError
 from config import DEFAULT_CONFIG, MONITORING_CONFIG
+from data.conversation_store import ConversationStore
 from data.task_run_store import TASK_LABELS, TaskRunStore
 
 BATCH_TYPES = {"followup": "monitoring_followup", "delete": "monitoring_delete"}
@@ -47,8 +50,9 @@ class MonitoringBatchRun:
                 raise JobActionError("批量任务不能重复选择同一会话", 400)
             seen.add(item["conversation_id"])
             if action == "followup" and (
-                    not isinstance(item.get("text"), str) or not 1 <= len(item["text"].strip()) <= 300
-                    or not isinstance(item.get("anchor_id"), str) or not item["anchor_id"].isdigit()
+                    not isinstance(item.get("text"), str) or len(item["text"].strip()) > 300
+                    or (item["text"].strip() and
+                        (not isinstance(item.get("anchor_id"), str) or not item["anchor_id"].isdigit()))
                     or not isinstance(item.get("expected_text"), str)):
                 raise JobActionError("批量追问须提供有效的追问语及草稿依据", 400)
         task_type = BATCH_TYPES[action]
@@ -69,6 +73,7 @@ class MonitoringBatchRun:
         counts = {"total": len(items), "completed": 0, "processed": 0, "failed": 0, "skipped": 0}
         label = TASK_LABELS[BATCH_TYPES[action]]
         failure = ""
+        failure_notes = []
         skip_notes = []
         try:
             for item in items:
@@ -76,23 +81,34 @@ class MonitoringBatchRun:
                     return
                 try:
                     if action == "followup":
-                        send_followup(self.db_path, config["browser"]["cdp_url"], "boss", item["conversation_id"],
-                            text=item["text"], anchor_id=item["anchor_id"], expected_text=item["expected_text"],
-                            max_count=config["monitoring"]["followup_max_count"])
+                        if not item["text"].strip():
+                            with closing(sqlite3.connect(self.db_path, timeout=10)) as conn:
+                                recorded = ConversationStore(conn).fail_empty_followup(
+                                    "boss", item["conversation_id"], item["expected_text"])
+                            if not recorded:
+                                raise JobActionError("会话或追问草稿已变化，未发送", 409)
+                            counts["failed"] += 1
+                            failure_notes.append(f"会话 {item['conversation_id']}：追问语为空，未发送")
+                        else:
+                            send_followup(self.db_path, config["browser"]["cdp_url"], "boss", item["conversation_id"],
+                                text=item["text"], anchor_id=item["anchor_id"], expected_text=item["expected_text"],
+                                max_count=config["monitoring"]["followup_max_count"],
+                                valid_days=config["monitoring"]["followup_valid_days"])
+                            counts["completed"] += 1
                     else:
                         delete_candidate(self.db_path, config["browser"]["cdp_url"], "boss", item["conversation_id"],
                             config["profile"]["blocked_companies"],
                             confirm_still_present=item.get("confirm_still_present") is True)
+                        counts["completed"] += 1
                 except FollowupSkipped as exc:
                     counts["skipped"] += 1
                     skip_notes.append(f"跳过会话 {item['conversation_id']}：{str(exc)[:400]}")
                 except Exception as exc:
                     counts["failed"] += 1
                     failure = f"会话 {item['conversation_id']}：{str(exc)[:400] or type(exc).__name__}"
-                else:
-                    counts["completed"] += 1
                 counts["processed"] += 1
-                progress = f"{label}：总数 {counts['total']}，已完成 {counts['completed']}，跳过 {counts['skipped']}"
+                progress = (f"{label}：总数 {counts['total']}，已完成 {counts['completed']}，"
+                            f"失败 {counts['failed']}，跳过 {counts['skipped']}")
                 if skip_notes:
                     progress += "。" + "；".join(skip_notes)
                 self.run_store.update_counts(run_id, counts, message=progress)
@@ -101,8 +117,8 @@ class MonitoringBatchRun:
         except Exception as exc:
             failure = str(exc)[:400] or type(exc).__name__
         counts["skipped"] += counts["total"] - counts["processed"]
-        status = ("completed_with_shortage" if counts["completed"] else "failed") if failure else "completed"
+        status = ("completed_with_shortage" if counts["completed"] else "failed") if (counts["failed"] or failure) else "completed"
         message = f"{label}完成：成功 {counts['completed']}，跳过 {counts['skipped']}，失败 {counts['failed']}。"
-        details = ([failure] if failure else []) + skip_notes
+        details = ([failure] if failure else []) + failure_notes + skip_notes
         message += "；".join(details)
         self.run_store.finish(run_id, status, message, counts, _now())

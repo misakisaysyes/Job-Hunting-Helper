@@ -101,6 +101,16 @@ class ConversationStore:
             biz_type TEXT NOT NULL DEFAULT '',
             PRIMARY KEY (platform, conversation_id, message_id)
         )""")
+        self.conn.execute("""CREATE TABLE IF NOT EXISTS followup_send_events (
+            platform TEXT NOT NULL,
+            conversation_id TEXT NOT NULL,
+            message_id TEXT NOT NULL,
+            source_job_id TEXT NOT NULL DEFAULT '',
+            sent_at TEXT NOT NULL,
+            PRIMARY KEY (platform, conversation_id, message_id)
+        )""")
+        self.conn.execute("""CREATE INDEX IF NOT EXISTS idx_followup_send_events_sent_at
+            ON followup_send_events(sent_at)""")
         conversation_columns = {row[1] for row in self.conn.execute("PRAGMA table_info(monitored_conversations)")}
         followup_columns = {
             "followup_count": "INTEGER NOT NULL DEFAULT 0",
@@ -113,6 +123,13 @@ class ConversationStore:
         for name, definition in followup_columns.items():
             if name not in conversation_columns:
                 self.conn.execute(f"ALTER TABLE monitored_conversations ADD COLUMN {name} {definition}")
+        self.conn.execute("""INSERT OR IGNORE INTO followup_send_events
+            (platform, conversation_id, message_id, source_job_id, sent_at)
+            SELECT platform, conversation_id,
+                CASE WHEN followup_anchor_id != '' THEN followup_anchor_id ELSE followup_last_sent_at END,
+                source_job_id, followup_last_sent_at
+            FROM monitored_conversations
+            WHERE followup_count > 0 AND followup_last_sent_at != ''""")
         if "active" not in conversation_columns:
             # Previously scanned rows need a fresh list check before reappearing.
             self.conn.execute("ALTER TABLE monitored_conversations ADD COLUMN active INTEGER NOT NULL DEFAULT 0")
@@ -336,9 +353,24 @@ class ConversationStore:
                 followup_anchor_id = ?, followup_error = '', updated_at = ?
             WHERE platform = ? AND conversation_id = ?
               AND active = 1 AND monitoring_terminated = 0
-              AND followup_status IN ('none', 'idle', 'stale')
+              AND followup_status IN ('none', 'idle', 'stale', 'draft_failed')
               AND judgment IN ('unread', 'read_no_reply')""",
             (text, anchor_id, now, platform, conversation_id))
+        self.conn.commit()
+        return cursor.rowcount == 1
+
+    def fail_empty_followup(self, platform: str, conversation_id: str,
+                            expected_text: str) -> bool:
+        """Record a batch failure without attempting to send an empty draft."""
+        cursor = self.conn.execute("""UPDATE monitored_conversations
+            SET followup_status = 'draft_failed', followup_text = '',
+                followup_error = '追问语为空，未发送',
+                updated_at = ?
+            WHERE platform = ? AND conversation_id = ? AND active = 1
+              AND monitoring_terminated = 0 AND judgment IN ('unread', 'read_no_reply')
+              AND followup_status IN ('none', 'idle', 'stale', 'pending_review', 'draft_failed')
+              AND followup_text = ?""",
+            (_now(), platform, conversation_id, expected_text))
         self.conn.commit()
         return cursor.rowcount == 1
 
@@ -435,6 +467,12 @@ class ConversationStore:
             (status, int(outcome == "sent"), outcome, outcome,
              outcome, message_id, outcome, now,
              outcome, note, now, platform, conversation_id))
+        if cursor.rowcount == 1 and outcome == "sent":
+            self.conn.execute("""INSERT OR IGNORE INTO followup_send_events
+                (platform, conversation_id, message_id, source_job_id, sent_at)
+                SELECT platform, conversation_id, ?, source_job_id, ?
+                FROM monitored_conversations WHERE platform = ? AND conversation_id = ?""",
+                (message_id or now, now, platform, conversation_id))
         self.conn.commit()
         return cursor.rowcount == 1
 

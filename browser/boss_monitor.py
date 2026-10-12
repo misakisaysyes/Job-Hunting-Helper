@@ -112,10 +112,15 @@ def _tab_friends(page: Any, tab_label: str | None, active_days: int | None,
             receipt_by_avatar[avatar] = item["status"]
 
     if tab_label:
-        tab_button = page.locator("li").filter(has_text=tab_label).first
-        tab_button.click(timeout=10000)
+        if tab_label == "有交换":
+            # BOSS keeps this tab in the “更多” menu; the label is not a top-level tab.
+            page.locator("li").filter(has_text="更多").first.click(timeout=10000)
+            page.get_by_text("有交换", exact=True).click(timeout=10000)
+        else:
+            tab_button = page.locator("li").filter(has_text=tab_label).first
+            tab_button.click(timeout=10000)
         page.wait_for_timeout(1000)
-        if "selected" not in (tab_button.get_attribute("class") or "").split():
+        if tab_label != "有交换" and "selected" not in (tab_button.get_attribute("class") or "").split():
             raise RuntimeError(f"未能切换到 BOSS「{tab_label}」标签")
         capture_visible_avatars()
     cutoff_ms = (int((datetime.now(timezone.utc) - timedelta(days=active_days)).timestamp() * 1000)
@@ -159,7 +164,33 @@ def _tab_friends(page: Any, tab_label: str | None, active_days: int | None,
     return selected
 
 
-def scan_new_greetings(cdp_url: str, *, on_progress: Callable[[str], None] | None = None
+def scan_exchanged_conversations(cdp_url: str, *,
+                                 active_days: int | None = None,
+                                 on_progress: Callable[[str], None] | None = None
+                                 ) -> list[dict[str, Any]]:
+    """Read the Exchange list without opening conversations or importing jobs."""
+    browser = ChromeBrowser(cdp_url)
+    try:
+        tab = browser.new_tab("https://www.zhipin.com/robots.txt", background=True)
+        if tab is None:
+            raise RuntimeError("无法连接 BOSS 页面")
+        friends = _tab_friends(browser.page(tab), "有交换", active_days, on_progress)
+        if on_progress:
+            on_progress(f"已读取「有交换」列表 {len(friends)} 条会话")
+        return [{
+            "platform": "boss", "conversation_id": str(friend["uid"]),
+            "company": str(friend.get("brandName") or "").strip(),
+            "recruiter": str(friend.get("name") or "").strip(),
+            "job_title": str(friend.get("sourceTitle") or "").strip(),
+            "source_job_id": str(friend.get("encryptJobId") or ""),
+            "last_ts": int(friend.get("lastTS") or 0),
+        } for friend in friends]
+    finally:
+        browser.close()
+
+
+def scan_new_greetings(cdp_url: str, *, active_days: int | None = None,
+                       on_progress: Callable[[str], None] | None = None
                        ) -> list[dict[str, Any]]:
     """Read company names from the New Greetings list; preserve every unread badge."""
     browser = ChromeBrowser(cdp_url)
@@ -167,7 +198,7 @@ def scan_new_greetings(cdp_url: str, *, on_progress: Callable[[str], None] | Non
         tab = browser.new_tab("https://www.zhipin.com/robots.txt", background=True)
         if tab is None:
             raise RuntimeError("无法连接 BOSS 页面")
-        friends = _tab_friends(browser.page(tab), "新招呼", None, on_progress)
+        friends = _tab_friends(browser.page(tab), "新招呼", active_days, on_progress)
         if on_progress:
             on_progress(f"已读取「新招呼」列表 {len(friends)} 条会话")
         return [{

@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { confirmFilterDelete, deleteConversationRecord, deleteFilterRecord, generateFollowup, getCurrentMonitoring, listConversations, listFilterCandidates, openConversation, openFilterCandidate, sendFollowup, startMonitoring, terminateMonitoring } from "../../api/monitoring";
+import { confirmFilterDelete, deleteConversationRecord, deleteExchangedConversation, deleteFilterRecord, generateFollowup, getCurrentMonitoring, listConversations, listExchangedConversations, listFilterCandidates, openConversation, openExchangedConversation, openFilterCandidate, sendFollowup, startMonitoring, terminateMonitoring } from "../../api/monitoring";
 import ConversationList from "./ConversationList";
 import ConversationDetails from "./ConversationDetails";
 import { savedFollowupText } from "./conversationDisplay";
 import FilterCandidateList from "./FilterCandidateList";
+import ExchangeConversationList from "./ExchangeConversationList";
 import MonitoringStatus from "./MonitoringStatus";
 import useMonitoringBatch from "./useMonitoringBatch";
 import { createFollowupGenerationAction } from "./followupGeneration";
@@ -17,7 +18,7 @@ function hasRunningMonitoring(state) {
 export default function MonitoringPage() {
   const [monitoring, setMonitoring] = useState({ status: "idle", message: "", counts: {} });
   const [statusReady, setStatusReady] = useState(false);
-  const [starting, setStarting] = useState(false);
+  const [starting, setStarting] = useState("");
   const [taskError, setTaskError] = useState("");
   const [conversations, setConversations] = useState([]);
   const [total, setTotal] = useState(0);
@@ -30,6 +31,7 @@ export default function MonitoringPage() {
   const [conversationRefreshVersion, setConversationRefreshVersion] = useState(0);
   const [listLoading, setListLoading] = useState(true);
   const [listError, setListError] = useState("");
+  const [conversationResultKey, setConversationResultKey] = useState("");
   const [openingConversation, setOpeningConversation] = useState("");
   const [openNotice, setOpenNotice] = useState(null);
   const [busyFollowup, setBusyFollowup] = useState("");
@@ -37,6 +39,18 @@ export default function MonitoringPage() {
   const [expandedConversation, setExpandedConversation] = useState("");
   const [busyTerminate, setBusyTerminate] = useState("");
   const [busyConversationDelete, setBusyConversationDelete] = useState("");
+  const [exchanges, setExchanges] = useState([]);
+  const [exchangeTotal, setExchangeTotal] = useState(0);
+  const [exchangePage, setExchangePage] = useState(0);
+  const [exchangeSearch, setExchangeSearch] = useState("");
+  const [exchangeQuery, setExchangeQuery] = useState("");
+  const [exchangePoolStatus, setExchangePoolStatus] = useState("");
+  const [exchangeLoading, setExchangeLoading] = useState(true);
+  const [exchangeError, setExchangeError] = useState("");
+  const [exchangeResultKey, setExchangeResultKey] = useState("");
+  const [exchangeNotice, setExchangeNotice] = useState(null);
+  const [openingExchange, setOpeningExchange] = useState("");
+  const [deletingExchange, setDeletingExchange] = useState("");
   const [filterCandidates, setFilterCandidates] = useState([]);
   const [filterTotal, setFilterTotal] = useState(0);
   const [filterPage, setFilterPage] = useState(0);
@@ -44,13 +58,22 @@ export default function MonitoringPage() {
   const [filterQuery, setFilterQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterLoading, setFilterLoading] = useState(true);
-  const [filterRefreshVersion, setFilterRefreshVersion] = useState(0);
   const [filterError, setFilterError] = useState("");
+  const [filterResultKey, setFilterResultKey] = useState("");
   const [busyFilter, setBusyFilter] = useState("");
   const [busyFilterRecordDelete, setBusyFilterRecordDelete] = useState("");
   const [filterNotice, setFilterNotice] = useState(null);
   const [openingFilterCandidate, setOpeningFilterCandidate] = useState("");
   const monitoringBusy = hasRunningMonitoring(monitoring);
+  const conversationKey = JSON.stringify([page, conversationQuery, conversationStatus, followupStatus]);
+  const exchangeKey = JSON.stringify([exchangePage, exchangeQuery, exchangePoolStatus]);
+  const filterKey = JSON.stringify([filterPage, filterQuery, filterStatus]);
+  const visibleConversations = conversationResultKey === conversationKey ? conversations : [];
+  const visibleExchanges = exchangeResultKey === exchangeKey ? exchanges : [];
+  const visibleFilterCandidates = filterResultKey === filterKey ? filterCandidates : [];
+  const conversationCount = listError ? "—" : conversationResultKey === conversationKey ? total : "…";
+  const exchangeCount = exchangeError ? "—" : exchangeResultKey === exchangeKey ? exchangeTotal : "…";
+  const filterCount = filterError ? "—" : filterResultKey === filterKey ? filterTotal : "…";
 
   function updateBatchTask(action, state) {
     setMonitoring((previous) => ({ ...previous, batches: { ...previous.batches, [action]: state } }));
@@ -72,7 +95,7 @@ export default function MonitoringPage() {
   }
 
   const conversationBatch = useMonitoringBatch({
-    items: conversations.map((item) => ({ ...item, saved_followup_text: item.followup_text,
+    items: visibleConversations.map((item) => ({ ...item, saved_followup_text: item.followup_text,
       followup_text: followupText(item) })), page,
     filters: `${conversationQuery}\u0000${conversationStatus}\u0000${followupStatus}`,
     loading: listLoading || monitoringBusy || Boolean(busyFollowup || busyTerminate || busyConversationDelete || openingConversation),
@@ -85,8 +108,8 @@ export default function MonitoringPage() {
         batchAction: "followup",
         toBatchItem: (item) => ({ platform: item.platform, conversation_id: item.conversation_id,
           text: item.followup_text, anchor_id: item.followup_anchor_id, expected_text: item.saved_followup_text }),
-        eligible: (item) => Boolean(item.followup_eligible && item.followup_text.trim()
-          && item.followup_text.trim().length <= 300),
+        eligible: (item) => item.followup_display_status === "available"
+          && item.followup_text.trim().length <= 300,
         perform: (item) => sendFollowup(item.platform, item.conversation_id,
           { text: item.followup_text, anchor_id: item.followup_anchor_id,
             expected_text: item.saved_followup_text }),
@@ -104,7 +127,7 @@ export default function MonitoringPage() {
     },
   });
   const filterBatch = useMonitoringBatch({
-    items: filterCandidates, page: filterPage,
+    items: visibleFilterCandidates, page: filterPage,
     filters: `${filterQuery}\u0000${filterStatus}`,
     loading: filterLoading || monitoringBusy || Boolean(busyFilter || busyFilterRecordDelete || openingFilterCandidate),
     onTaskChange: updateBatchTask,
@@ -127,6 +150,20 @@ export default function MonitoringPage() {
       },
     },
   });
+  const exchangeBatch = useMonitoringBatch({
+    items: visibleExchanges, page: exchangePage,
+    filters: `${exchangeQuery}\u0000${exchangePoolStatus}`,
+    persistSelectionAcrossPages: true,
+    loading: exchangeLoading || monitoringBusy || Boolean(openingExchange || deletingExchange),
+    onReload: () => setListVersion((version) => version + 1),
+    actions: {
+      delete: {
+        label: "删除会话", stopOnFailure: true, eligible: () => true,
+        confirm: (count) => `确定从 BOSS「有交换」删除所选 ${count} 条会话吗？BOSS 会同时删除这些聊天记录。若某条删除结果不明，批量操作会停止。`,
+        perform: (item) => deleteExchangedConversation(item.platform, item.conversation_id),
+      },
+    },
+  });
 
   useEffect(() => {
     const timer = window.setTimeout(() => setConversationQuery(conversationSearch.trim()), 250);
@@ -137,6 +174,11 @@ export default function MonitoringPage() {
     const timer = window.setTimeout(() => setFilterQuery(filterSearch.trim()), 250);
     return () => window.clearTimeout(timer);
   }, [filterSearch]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setExchangeQuery(exchangeSearch.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [exchangeSearch]);
 
   useEffect(() => { setExpandedConversation(""); }, [page, conversationQuery, conversationStatus, followupStatus]);
 
@@ -151,13 +193,15 @@ export default function MonitoringPage() {
 
   useEffect(() => {
     let active = true;
+    let timer;
     setListLoading(true);
     setListError("");
-    listConversations(PAGE_SIZE, page * PAGE_SIZE, {
-      query: conversationQuery,
-      conversation_status: conversationStatus, followup_status: followupStatus,
-    })
-      .then((data) => {
+    async function refresh() {
+      try {
+        const data = await listConversations(PAGE_SIZE, page * PAGE_SIZE, {
+          query: conversationQuery,
+          conversation_status: conversationStatus, followup_status: followupStatus,
+        });
         if (!active) return;
         if (!data.conversations.length && page > 0) {
           setPage(Math.max(0, Math.ceil(data.total / PAGE_SIZE) - 1));
@@ -165,20 +209,36 @@ export default function MonitoringPage() {
         }
         setConversations(data.conversations);
         setTotal(data.total);
-      })
-      .catch((cause) => { if (active) setListError(cause.message || "无法加载会话列表"); })
-      .finally(() => { if (active) setListLoading(false); });
-    return () => { active = false; };
+        setConversationResultKey(conversationKey);
+        setListError("");
+      } catch (cause) {
+        if (active) {
+          setConversations([]);
+          setTotal(0);
+          setConversationResultKey(conversationKey);
+          setListError(cause.message || "无法加载会话列表");
+        }
+      } finally {
+        if (active) {
+          setListLoading(false);
+          timer = window.setTimeout(refresh, 3000);
+        }
+      }
+    }
+    void refresh();
+    return () => { active = false; window.clearTimeout(timer); };
   }, [page, listVersion, conversationRefreshVersion, conversationQuery, conversationStatus, followupStatus]);
 
   useEffect(() => {
     let active = true;
+    let timer;
     setFilterLoading(true);
     setFilterError("");
-    listFilterCandidates(PAGE_SIZE, filterPage * PAGE_SIZE, {
-      query: filterQuery, status: filterStatus,
-    })
-      .then((data) => {
+    async function refresh() {
+      try {
+        const data = await listFilterCandidates(PAGE_SIZE, filterPage * PAGE_SIZE, {
+          query: filterQuery, status: filterStatus,
+        });
         if (!active) return;
         if (!data.candidates.length && filterPage > 0) {
           setFilterPage(Math.max(0, Math.ceil(data.total / PAGE_SIZE) - 1));
@@ -186,11 +246,61 @@ export default function MonitoringPage() {
         }
         setFilterCandidates(data.candidates);
         setFilterTotal(data.total);
-      })
-      .catch((cause) => { if (active) setFilterError(cause.message || "无法加载过滤候选"); })
-      .finally(() => { if (active) setFilterLoading(false); });
-    return () => { active = false; };
-  }, [filterPage, listVersion, filterRefreshVersion, filterQuery, filterStatus]);
+        setFilterResultKey(filterKey);
+        setFilterError("");
+      } catch (cause) {
+        if (active) {
+          setFilterCandidates([]);
+          setFilterTotal(0);
+          setFilterResultKey(filterKey);
+          setFilterError(cause.message || "无法加载过滤候选");
+        }
+      } finally {
+        if (active) {
+          setFilterLoading(false);
+          timer = window.setTimeout(refresh, 3000);
+        }
+      }
+    }
+    void refresh();
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [filterPage, listVersion, filterQuery, filterStatus]);
+
+  useEffect(() => {
+    let active = true;
+    let timer;
+    setExchangeLoading(true);
+    setExchangeError("");
+    async function refresh() {
+      try {
+        const data = await listExchangedConversations(
+          PAGE_SIZE, exchangePage * PAGE_SIZE, exchangeQuery, exchangePoolStatus);
+        if (!active) return;
+        if (!data.conversations.length && exchangePage > 0) {
+          setExchangePage(Math.max(0, Math.ceil(data.total / PAGE_SIZE) - 1));
+          return;
+        }
+        setExchanges(data.conversations);
+        setExchangeTotal(data.total);
+        setExchangeResultKey(exchangeKey);
+        setExchangeError("");
+      } catch (cause) {
+        if (active) {
+          setExchanges([]);
+          setExchangeTotal(0);
+          setExchangeResultKey(exchangeKey);
+          setExchangeError(cause.message || "无法加载有交换会话");
+        }
+      } finally {
+        if (active) {
+          setExchangeLoading(false);
+          timer = window.setTimeout(refresh, 3000);
+        }
+      }
+    }
+    void refresh();
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [exchangePage, exchangeQuery, exchangePoolStatus, listVersion]);
 
   useEffect(() => {
     const deadlines = conversations.map((item) => Date.parse(item.followup_cooldown_until))
@@ -212,8 +322,9 @@ export default function MonitoringPage() {
         setMonitoring(state);
         setTaskError("");
         if (!hasRunningMonitoring(state)) {
-          setPage(0);
-          setFilterPage(0);
+          if (["all", "communicated"].includes(state.phase)) setPage(0);
+          if (["all", "new_greetings"].includes(state.phase)) setFilterPage(0);
+          if (state.phase === "exchanged") setExchangePage(0);
           setListVersion((version) => version + 1);
           return;
         }
@@ -226,21 +337,22 @@ export default function MonitoringPage() {
     return () => { active = false; window.clearTimeout(timer); };
   }, [monitoringBusy]);
 
-  async function start() {
-    setStarting(true);
+  async function start(phase) {
+    setStarting(phase);
     setTaskError("");
     try {
-      const state = await startMonitoring();
+      const state = await startMonitoring(phase);
       setMonitoring((previous) => ({ ...previous, ...state }));
       if (state.status !== "running") {
-        setPage(0);
-        setFilterPage(0);
+        if (phase === "communicated") setPage(0);
+        if (phase === "new_greetings") setFilterPage(0);
+        if (phase === "exchanged") setExchangePage(0);
         setListVersion((version) => version + 1);
       }
     } catch (cause) {
       setTaskError(cause.message || "启动监测失败");
     } finally {
-      setStarting(false);
+      setStarting("");
     }
   }
 
@@ -281,7 +393,7 @@ export default function MonitoringPage() {
       setListVersion((version) => version + 1);
       return result;
     } catch (cause) {
-      setOpenNotice({ type: "error", text: cause.message || "追问操作失败，请刷新查看状态" });
+      setOpenNotice({ type: "error", text: cause.message || "追问操作失败，列表会自动更新状态" });
       setListVersion((version) => version + 1);
       throw cause;
     }
@@ -332,7 +444,7 @@ export default function MonitoringPage() {
         candidate.status === "unknown");
       setFilterNotice({ type: "success", text: result.message || "会话已删除" });
     } catch (cause) {
-      setFilterNotice({ type: "error", text: cause.message || "过滤操作失败，请刷新查看状态" });
+      setFilterNotice({ type: "error", text: cause.message || "过滤操作失败，列表会自动更新状态" });
     } finally {
       setBusyFilter("");
       setListVersion((version) => version + 1);
@@ -369,21 +481,51 @@ export default function MonitoringPage() {
     }
   }
 
+  async function openExchangeChat(conversation) {
+    const key = `${conversation.platform}:${conversation.conversation_id}`;
+    setOpeningExchange(key);
+    setExchangeNotice(null);
+    try {
+      const result = await openExchangedConversation(conversation.platform, conversation.conversation_id);
+      setExchangeNotice({ type: "success", text: result.message || "已在 Chrome 打开「有交换」中的目标会话" });
+    } catch (cause) {
+      setExchangeNotice({ type: "error", text: cause.message || "定位有交换会话失败" });
+    } finally {
+      setOpeningExchange("");
+    }
+  }
+
+  async function handleExchangeDelete(conversation) {
+    if (!window.confirm(`确定从 BOSS「有交换」删除「${conversation.company || conversation.recruiter || conversation.conversation_id}」的会话吗？\nBOSS 会同时删除这段聊天记录。`)) return;
+    const key = `${conversation.platform}:${conversation.conversation_id}`;
+    setDeletingExchange(key);
+    setExchangeNotice(null);
+    try {
+      const result = await deleteExchangedConversation(conversation.platform, conversation.conversation_id);
+      setExchanges((previous) => previous.filter((item) =>
+        `${item.platform}:${item.conversation_id}` !== key));
+      setExchangeTotal((previous) => Math.max(0, previous - 1));
+      setExchangeNotice({ type: "success", text: result.message || "已从 BOSS「有交换」删除会话" });
+      setListVersion((version) => version + 1);
+    } catch (cause) {
+      setExchangeNotice({ type: "error", text: cause.message || "删除有交换会话失败" });
+    } finally {
+      setDeletingExchange("");
+    }
+  }
+
   return (
     <main className="content monitoring-page">
       <div className="heading">
         <div>
           <p className="eyebrow">WORKBENCH</p>
           <h1>监测任务</h1>
-          <p className="subtitle">监测「仅沟通」中未读、已读未回的会话，并从「新招呼」筛出命中公司排除词的会话。</p>
+          <p className="subtitle">分别启动「仅沟通」「有交换」与「新招呼」扫描，查看对应会话和过滤结果。</p>
         </div>
-        <button className="start-button" type="button" onClick={start}
-          disabled={!statusReady || starting || monitoringBusy}>
-          {!statusReady ? "准备中…" : starting ? "启动中…" : monitoringBusy ? "监测任务执行中…" : "扫描会话"}
-        </button>
       </div>
 
-      <MonitoringStatus monitoring={monitoring} />
+      <MonitoringStatus monitoring={monitoring} onStart={start} starting={starting}
+        statusReady={statusReady} monitoringBusy={monitoringBusy} />
       {taskError && <div className="error" role="alert">{taskError}</div>}
 
       <div className="section-heading monitoring-section-heading">
@@ -394,43 +536,49 @@ export default function MonitoringPage() {
         <input type="search" aria-label="搜索会话" placeholder="搜索岗位、公司、HR 或会话 ID"
           disabled={Boolean(conversationBatch.busy)}
           value={conversationSearch} onChange={(event) => { setPage(0); setConversationSearch(event.target.value); }} />
-        <select aria-label="筛选HR检阅状态" value={conversationStatus} disabled={Boolean(conversationBatch.busy)}
-          onChange={(event) => { setPage(0); setConversationStatus(event.target.value); }}>
-          <option value="">全部HR检阅状态</option>
-          <option value="unread">未读</option>
-          <option value="read_no_reply">已读未回</option>
-        </select>
-        <select aria-label="筛选追问状态" value={followupStatus} disabled={Boolean(conversationBatch.busy)}
-          onChange={(event) => { setPage(0); setFollowupStatus(event.target.value); }}>
-          <option value="">全部追问状态</option>
-          <option value="available">可追问</option>
-          <option value="cooling">冷冻中</option>
-          <option value="pending_review">追问语待发送</option>
-          <option value="followed_up">已追问</option>
-          <option value="failed">发送失败</option>
-          <option value="unknown">结果不明</option>
-        </select>
+        <div className="monitoring-select">
+          <select aria-label="筛选HR检阅状态" aria-describedby="conversation-review-count"
+            value={conversationStatus} disabled={Boolean(conversationBatch.busy)}
+            onChange={(event) => { setPage(0); setConversationStatus(event.target.value); }}>
+            <option value="">全部HR检阅状态</option>
+            <option value="unread">未读</option>
+            <option value="read_no_reply">已读未回</option>
+          </select>
+          <span id="conversation-review-count" className="monitoring-select-count">{conversationCount} 条</span>
+        </div>
+        <div className="monitoring-select">
+          <select aria-label="筛选追问状态" aria-describedby="conversation-followup-count"
+            value={followupStatus} disabled={Boolean(conversationBatch.busy)}
+            onChange={(event) => { setPage(0); setFollowupStatus(event.target.value); }}>
+            <option value="">全部追问状态</option>
+            <option value="available">可追问</option>
+            <option value="unavailable">不可追问</option>
+            <option value="sending">发送中</option>
+            <option value="incomplete">追问未完成</option>
+          </select>
+          <span id="conversation-followup-count" className="monitoring-select-count">{conversationCount} 条</span>
+        </div>
       </div>
       {listError && <div className="error" role="alert">{listError}</div>}
       {openNotice && <div className={openNotice.type === "error" ? "error" : "notice"}
         role={openNotice.type === "error" ? "alert" : "status"}>{openNotice.text}</div>}
-      <ConversationList conversations={conversations} total={total} page={page} pageSize={PAGE_SIZE}
-        loading={listLoading} onPage={setPage}
-        onRefresh={() => setConversationRefreshVersion((version) => version + 1)}
+      <ConversationList conversations={visibleConversations}
+        total={conversationResultKey === conversationKey ? total : 0} page={page} pageSize={PAGE_SIZE}
+        loading={listLoading || conversationResultKey !== conversationKey} onPage={setPage}
         expanded={expandedConversation} onExpanded={setExpandedConversation}
         renderDetails={(conversation) => <ConversationDetails conversation={conversation}
           draft={followupText(conversation)} onDraftChange={(text) => editFollowup(conversation, text)}
           onChange={updateFollowup} onSend={handleFollowup} onOpen={openChat}
           openingConversation={openingConversation}
           onTerminate={handleTerminate} terminatingConversation={busyTerminate}
-          disabled={monitoringBusy || Boolean(busyFollowup || busyTerminate || busyConversationDelete || conversationBatch.busy || filterBatch.busy)}
+          disabled={monitoringBusy || Boolean(busyFollowup || busyTerminate || busyConversationDelete || conversationBatch.busy || filterBatch.busy || exchangeBatch.busy)}
           onBusyChange={(action) => setBusyFollowup(action
             ? `${conversation.platform}:${conversation.conversation_id}` : "")} />}
-        onDelete={handleConversationDelete} busyAction={monitoringBusy || busyFollowup || busyTerminate || busyConversationDelete || filterBatch.busy}
+        onDelete={handleConversationDelete} busyAction={monitoringBusy || busyFollowup || busyTerminate || busyConversationDelete || filterBatch.busy || exchangeBatch.busy}
         busyDelete={busyConversationDelete}
         batch={conversationBatch} onBatchModeChange={(enabled) => {
-          if (filterBatch.busy) return;
-          if (enabled) { filterBatch.close(); conversationBatch.setBatchMode(true); }
+          if (filterBatch.busy || exchangeBatch.busy) return;
+          if (enabled) { filterBatch.close(); exchangeBatch.close(); conversationBatch.setBatchMode(true); }
           else conversationBatch.close();
         }}
         filtered={Boolean(conversationQuery || conversationStatus || followupStatus)} />
@@ -439,13 +587,13 @@ export default function MonitoringPage() {
         <section className="followup-modal monitoring-batch-preview" role="dialog" aria-modal="true"
           aria-labelledby="batch-followup-title" onMouseDown={(event) => event.stopPropagation()}>
           <div className="followup-modal-heading"><div><h3 id="batch-followup-title">批量追问语预览</h3>
-            <p>将发送 {conversationBatch.preview.eligible.length} 条；跳过 {conversationBatch.preview.skipped} 条。</p></div>
+            <p>将处理 {conversationBatch.preview.eligible.length} 条；其中追问语为空的会记为失败并继续下一条；跳过 {conversationBatch.preview.skipped} 条。</p></div>
             <button type="button" aria-label="关闭批量追问语预览" onClick={() => conversationBatch.setPreview(null)}>×</button>
           </div>
           <div className="monitoring-batch-preview-list">{conversationBatch.preview.eligible.map((item) =>
             <div key={`${item.platform}:${item.conversation_id}`}>
               <strong>{item.company || "未知公司"} · {item.recruiter || "未知 HR"}</strong>
-              <p>{item.followup_text}</p>
+              <p>{item.followup_text.trim() || "追问语为空：本条将记为失败，不会发送"}</p>
             </div>)}</div>
           <div className="followup-modal-actions">
             <button type="button" onClick={() => conversationBatch.setPreview(null)}>取消</button>
@@ -456,6 +604,40 @@ export default function MonitoringPage() {
         </section>
       </div>}
       <div className="section-heading monitoring-section-heading">
+        <div><h2>「有交换」会话列表</h2>
+          <p>从 BOSS「更多 → 有交换」读取会话；池外岗位保持池外，不会自动入池。</p></div>
+      </div>
+      <div className="monitoring-filters" aria-label="「有交换」会话列表筛选">
+        <input type="search" aria-label="搜索有交换会话" placeholder="搜索岗位、公司、HR 或会话 ID"
+          disabled={Boolean(exchangeBatch.busy)}
+          value={exchangeSearch} onChange={(event) => { setExchangePage(0); setExchangeSearch(event.target.value); }} />
+        <div className="monitoring-select">
+          <select aria-label="筛选有交换岗位池状态" aria-describedby="exchange-pool-count"
+            value={exchangePoolStatus} disabled={Boolean(exchangeBatch.busy)}
+            onChange={(event) => { setExchangePage(0); setExchangePoolStatus(event.target.value); }}>
+            <option value="">全部岗位</option>
+            <option value="inside">池内</option>
+            <option value="outside">池外</option>
+          </select>
+          <span id="exchange-pool-count" className="monitoring-select-count">{exchangeCount} 条</span>
+        </div>
+      </div>
+      {exchangeError && <div className="error" role="alert">{exchangeError}</div>}
+      {exchangeNotice && <div className={exchangeNotice.type === "error" ? "error" : "notice"}
+        role={exchangeNotice.type === "error" ? "alert" : "status"}>{exchangeNotice.text}</div>}
+      <ExchangeConversationList conversations={visibleExchanges}
+        total={exchangeResultKey === exchangeKey ? exchangeTotal : 0} page={exchangePage}
+        pageSize={PAGE_SIZE} loading={exchangeLoading || exchangeResultKey !== exchangeKey} onPage={setExchangePage}
+        filtered={Boolean(exchangeQuery || exchangePoolStatus)}
+        onOpen={openExchangeChat} onDelete={handleExchangeDelete}
+        opening={openingExchange} deleting={deletingExchange}
+        busy={monitoringBusy || conversationBatch.busy || filterBatch.busy}
+        batch={exchangeBatch} onBatchModeChange={(enabled) => {
+          if (conversationBatch.busy || filterBatch.busy) return;
+          if (enabled) { conversationBatch.close(); filterBatch.close(); exchangeBatch.setBatchMode(true); }
+          else exchangeBatch.close();
+        }} />
+      <div className="section-heading monitoring-section-heading">
         <div><h2>「新招呼」会话列表</h2>
           <p>仅展示「新招呼」中命中公司排除词的会话；确认删除后会先打开目标会话，再从菜单删除。打开会话可能清除未读标记。</p></div>
       </div>
@@ -463,29 +645,33 @@ export default function MonitoringPage() {
         <input type="search" aria-label="搜索过滤候选" placeholder="搜索公司、HR、岗位、排除词或会话 ID"
           disabled={Boolean(filterBatch.busy)}
           value={filterSearch} onChange={(event) => { setFilterPage(0); setFilterSearch(event.target.value); }} />
-        <select aria-label="筛选过滤状态" value={filterStatus} disabled={Boolean(filterBatch.busy)}
-          onChange={(event) => { setFilterPage(0); setFilterStatus(event.target.value); }}>
-          <option value="">全部处理状态</option>
-          <option value="pending_review">待审核删除</option>
-          <option value="deleting">删除中</option>
-          <option value="deleted">已删除</option>
-          <option value="failed">删除失败</option>
-          <option value="unknown">结果不明</option>
-          <option value="stale">已失效</option>
-        </select>
+        <div className="monitoring-select">
+          <select aria-label="筛选过滤状态" aria-describedby="filter-candidate-count"
+            value={filterStatus} disabled={Boolean(filterBatch.busy)}
+            onChange={(event) => { setFilterPage(0); setFilterStatus(event.target.value); }}>
+            <option value="">全部处理状态</option>
+            <option value="pending_review">待审核删除</option>
+            <option value="deleting">删除中</option>
+            <option value="deleted">已删除</option>
+            <option value="failed">删除失败</option>
+            <option value="unknown">结果不明</option>
+            <option value="stale">已失效</option>
+          </select>
+          <span id="filter-candidate-count" className="monitoring-select-count">{filterCount} 条</span>
+        </div>
       </div>
       {filterError && <div className="error" role="alert">{filterError}</div>}
       {filterNotice && <div className={filterNotice.type === "error" ? "error" : "notice"}
         role={filterNotice.type === "error" ? "alert" : "status"}>{filterNotice.text}</div>}
-      <FilterCandidateList candidates={filterCandidates} total={filterTotal} page={filterPage}
-        pageSize={PAGE_SIZE} loading={filterLoading} onPage={setFilterPage}
-        onRefresh={() => setFilterRefreshVersion((version) => version + 1)}
+      <FilterCandidateList candidates={visibleFilterCandidates}
+        total={filterResultKey === filterKey ? filterTotal : 0} page={filterPage}
+        pageSize={PAGE_SIZE} loading={filterLoading || filterResultKey !== filterKey} onPage={setFilterPage}
         onAction={handleFilter} onOpen={openFilteredChat} onDelete={handleFilterRecordDelete}
-        openingCandidate={openingFilterCandidate} busy={monitoringBusy || busyFilter || busyFilterRecordDelete || conversationBatch.busy}
+        openingCandidate={openingFilterCandidate} busy={monitoringBusy || busyFilter || busyFilterRecordDelete || conversationBatch.busy || exchangeBatch.busy}
         busyDelete={busyFilterRecordDelete}
         batch={filterBatch} onBatchModeChange={(enabled) => {
-          if (conversationBatch.busy) return;
-          if (enabled) { conversationBatch.close(); filterBatch.setBatchMode(true); }
+          if (conversationBatch.busy || exchangeBatch.busy) return;
+          if (enabled) { conversationBatch.close(); exchangeBatch.close(); filterBatch.setBatchMode(true); }
           else filterBatch.close();
         }}
         filtered={Boolean(filterQuery || filterStatus)} />

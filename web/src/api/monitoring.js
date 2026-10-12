@@ -4,8 +4,8 @@ export function getCurrentMonitoring() {
   return requestJson("/api/monitoring/current");
 }
 
-export function startMonitoring() {
-  return requestJson("/api/monitoring", jsonOptions("POST"));
+export function startMonitoring(phase) {
+  return requestJson("/api/monitoring", jsonOptions("POST", { phase }));
 }
 
 export function startMonitoringBatch(action, items) {
@@ -22,6 +22,21 @@ export function listConversations(limit, offset, filters = {}) {
     if (value) params.set(key, value);
   }
   return requestJson(`/api/conversations?${params}`);
+}
+
+export function listExchangedConversations(limit, offset, query = "", poolStatus = "") {
+  const params = new URLSearchParams({ limit, offset });
+  if (query) params.set("query", query);
+  if (poolStatus) params.set("pool_status", poolStatus);
+  return requestJson(`/api/exchanged-conversations?${params}`);
+}
+
+export function openExchangedConversation(platform, conversationId) {
+  return requestJson(`/api/exchanged-conversations/${encodeURIComponent(platform)}/${encodeURIComponent(conversationId)}/open`, jsonOptions("POST", {}));
+}
+
+export function deleteExchangedConversation(platform, conversationId) {
+  return requestJson(`/api/exchanged-conversations/${encodeURIComponent(platform)}/${encodeURIComponent(conversationId)}`, jsonOptions("DELETE"));
 }
 
 export function listFilterCandidates(limit, offset, filters = {}) {

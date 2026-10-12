@@ -136,11 +136,17 @@ class ChromeBrowser:
                 pass
             if not page.url.startswith("https://www.zhipin.com/web/geek/chat"):
                 return False
-            tab = page.locator("li").filter(has_text=tab_label).first
-            tab.click(timeout=10000)
-            page.wait_for_function("""label => [...document.querySelectorAll('li')]
-                .some(node => node.textContent.includes(label)
-                    && node.classList.contains('selected'))""", arg=tab_label, timeout=10000)
+            if tab_label == "有交换":
+                page.locator("li").filter(has_text="更多").first.click(timeout=10000)
+                friends.clear()
+                page.get_by_text("有交换", exact=True).click(timeout=10000)
+                page.wait_for_timeout(1000)
+            else:
+                tab = page.locator("li").filter(has_text=tab_label).first
+                tab.click(timeout=10000)
+                page.wait_for_function("""label => [...document.querySelectorAll('li')]
+                    .some(node => node.textContent.includes(label)
+                        && node.classList.contains('selected'))""", arg=tab_label, timeout=10000)
             page.locator(".friend-content").first.wait_for(state="attached", timeout=15000)
             page.evaluate("""() => {
                 const list = document.querySelector('.user-list-content');

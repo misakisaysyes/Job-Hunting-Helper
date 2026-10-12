@@ -311,7 +311,19 @@ class JobStore:
     def search_jobs(self, *, limit: int, offset: int,
                     matches: Callable[[dict[str, Any]], bool]) -> tuple[list[dict[str, Any]], int]:
         """Apply search before pagination, then hydrate only the visible jobs."""
+        jobs, total, _ = self.search_jobs_with_counts(
+            limit=limit, offset=offset, matches=matches,
+            bucket_for=lambda _job: None,
+        )
+        return jobs, total
+
+    def search_jobs_with_counts(self, *, limit: int, offset: int,
+                                matches: Callable[[dict[str, Any]], bool],
+                                bucket_for: Callable[[dict[str, Any]], str | None],
+                                selected_bucket: str = "") -> tuple[list[dict[str, Any]], int, dict[str, int]]:
+        """Count all matching jobs by bucket before applying the selected status and pagination."""
         keys = []
+        counts = {"all": 0}
         rows = self.conn.execute("""SELECT platform, source_job_id, record_json, job_status,
                                          ai_score_status, ai_score
                                   FROM collected_jobs
@@ -320,11 +332,16 @@ class JobStore:
             record = json.loads(record_json)
             record.update(job_status=status, ai_score_status=score_status, ai_score=score)
             if matches(record):
-                keys.append((platform, source_job_id))
+                counts["all"] += 1
+                bucket = bucket_for(record)
+                if bucket:
+                    counts[bucket] = counts.get(bucket, 0) + 1
+                if not selected_bucket or bucket == selected_bucket:
+                    keys.append((platform, source_job_id))
         total = len(keys)
         jobs = [self.get_job(platform, source_job_id)
                 for platform, source_job_id in keys[offset:offset + limit]]
-        return [job for job in jobs if job is not None], total
+        return [job for job in jobs if job is not None], total, counts
 
     def set_status(self, platform: str, source_job_id: str, status: str) -> bool:
         if status not in JOB_STATUSES:

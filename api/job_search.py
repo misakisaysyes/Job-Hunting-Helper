@@ -155,14 +155,20 @@ def compile_search(expression: str) -> Callable[[dict[str, Any]], bool]:
 LIST_STATUSES = frozenset({"scored", "greeting_ready", "greeted", "ended"})
 
 
+def list_status_bucket(job: dict[str, Any]) -> str | None:
+    current = str(job.get("job_status") or "")
+    if current in {"collected", "filtered", "scored"}:
+        return "scored"
+    if current in {"greeted", "monitoring"}:
+        return "greeted"
+    if current.startswith("ended_"):
+        return "ended"
+    if current == "greeting_ready":
+        return current
+    return None
+
+
 def matches_list_status(job: dict[str, Any], status: str) -> bool:
     if not status:
         return True
-    current = str(job.get("job_status") or "")
-    if status == "scored":
-        return current in {"collected", "filtered", "scored"}
-    if status == "greeted":
-        return current in {"greeted", "monitoring"}
-    if status == "ended":
-        return current.startswith("ended_")
-    return current == status
+    return list_status_bucket(job) == status

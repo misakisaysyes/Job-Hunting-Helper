@@ -10,11 +10,11 @@ const RUN_LABELS = {
 };
 
 export default function CollectionPage({
-  jobs, total, page, pageSize, loading, scoreThreshold,
+  jobs, total, statusCounts, page, pageSize, loading, scoreThreshold,
   expanded, onExpanded, deleting, onRemove, onJobChange, onPage,
   query, onQueryChange, statusFilter, onStatusFilterChange,
   collection, collectionError, error, thresholdWarning,
-  statusReady, starting, onStart, onRefresh,
+  statusReady, starting, onStart,
 }) {
   return (
     <main className="content collection-page">
@@ -28,9 +28,6 @@ export default function CollectionPage({
           <button className="start-button" onClick={onStart}
             disabled={!statusReady || starting || collection.status === "running"}>
             {!statusReady ? "准备中…" : starting ? "启动中…" : collection.status === "running" ? "正在采集…" : "开始采集"}
-          </button>
-          <button className="refresh-button" onClick={onRefresh} disabled={loading}>
-            ↻ <span>刷新列表</span>
           </button>
         </div>
       </div>
@@ -64,7 +61,8 @@ export default function CollectionPage({
         <h2>已入库岗位</h2>
         <p>岗位状态、评分与详情集中在这里查看。</p>
       </div>
-      <JobList jobs={jobs} total={total} page={page} pageSize={pageSize} loading={loading}
+      <JobList jobs={jobs} total={total} statusCounts={statusCounts}
+        page={page} pageSize={pageSize} loading={loading}
         scoreThreshold={scoreThreshold} expanded={expanded} onExpanded={onExpanded}
         deleting={deleting} onRemove={onRemove} onJobChange={onJobChange} onPage={onPage}
         query={query} onQueryChange={onQueryChange} statusFilter={statusFilter}

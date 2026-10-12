@@ -10,7 +10,8 @@ from unittest.mock import Mock, patch
 from api.filtering import delete_candidate, delete_filter_record, matched_company_term
 from api.jobs import JobActionError
 from api.monitoring import MonitoringRun
-from browser.boss_filter import FilterDeleteResult, _confirm_delete_dialog
+from browser.boss_filter import (FilterDeleteResult, _confirm_delete_dialog,
+                                 delete_exchanged_conversation)
 from data.filter_store import FilterStore
 
 
@@ -22,6 +23,20 @@ GREETING = {
 
 
 class FilteringTests(unittest.TestCase):
+    def test_exchange_delete_checks_boss_identity_before_opening_row(self) -> None:
+        candidate = {"conversation_id": "123", "company": "甲公司", "recruiter": "张先生",
+                     "source_job_id": "job-a"}
+        friend = {"uid": "123", "brandName": "甲公司", "name": "张先生",
+                  "encryptJobId": "another-job", "avatar": "https://example.invalid/a.png"}
+        with patch("browser.boss_filter.ChromeBrowser") as browser, \
+                patch("browser.boss_filter._tab_friends", return_value=[friend]) as scan:
+            browser.return_value.new_tab.return_value = "tab"
+            result = delete_exchanged_conversation("cdp", candidate)
+        scan.assert_called_once_with(browser.return_value.page.return_value, "有交换", None)
+        self.assertFalse(result.verified)
+        self.assertFalse(result.uncertain)
+        browser.return_value.page.return_value.locator.assert_not_called()
+
     def test_in_page_delete_confirmation_clicks_expected_button(self) -> None:
         page = Mock()
         confirmation = page.locator.return_value.filter.return_value

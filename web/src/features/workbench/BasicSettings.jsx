@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { DISABLED_AI_SCORE_NOTICE } from "../config/configFields";
 
 const splitValues = (value) => value.split(/[,，\n]/).map((item) => item.trim()).filter(Boolean);
 
@@ -71,6 +72,7 @@ export function CollectionBasics({ settings, checks, onSave }) {
         onChange={(event) => update("useAiScore", event.target.checked)} />
       启用 AI 评分
     </label>
+    {!draft.useAiScore && <p className="workbench-score-note" role="note">{DISABLED_AI_SCORE_NOTICE}</p>}
     <label className="workbench-checkbox">
       <input type="checkbox" checked={draft.useAiGreeting}
         onChange={(event) => update("useAiGreeting", event.target.checked)} />

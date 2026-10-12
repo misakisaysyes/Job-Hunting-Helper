@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlite3
 import unittest
 
-from api.job_search import SearchSyntaxError, compile_search, matches_list_status
+from api.job_search import SearchSyntaxError, compile_search, list_status_bucket, matches_list_status
 from data.job_store import JobStore
 
 
@@ -80,6 +80,26 @@ class JobSearchTests(unittest.TestCase):
         jobs, total = self.store.search_jobs(limit=1, offset=1, matches=compile_search("产品 || React"))
         self.assertEqual(total, 2)
         self.assertEqual([job["source_job_id"] for job in jobs], ["react"])
+
+    def test_status_counts_follow_keyword_and_status_changes(self) -> None:
+        def counts(status: str = "", expression: str = ""):
+            return self.store.search_jobs_with_counts(
+                limit=1, offset=0, matches=compile_search(expression),
+                bucket_for=list_status_bucket, selected_bucket=status,
+            )
+
+        jobs, total, status_counts = counts("scored")
+        self.assertEqual((total, [job["source_job_id"] for job in jobs]), (1, ["campus"]))
+        self.assertEqual(status_counts, {"all": 2, "scored": 1, "greeting_ready": 1})
+
+        self.store.start_greeting("boss", "campus", allow_below_threshold=True)
+        jobs, total, status_counts = counts("scored")
+        self.assertEqual((jobs, total), ([], 0))
+        self.assertEqual(status_counts, {"all": 2, "greeting_ready": 2})
+
+        _, total, status_counts = counts("greeting_ready", "React")
+        self.assertEqual(total, 1)
+        self.assertEqual(status_counts, {"all": 1, "greeting_ready": 1})
 
     def test_invalid_expressions_are_rejected(self) -> None:
         for expression in ("React &&", "(React || 本科", "React || && 本科", "()"):

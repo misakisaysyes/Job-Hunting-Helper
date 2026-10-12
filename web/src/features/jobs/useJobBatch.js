@@ -1,40 +1,47 @@
 import { useEffect, useState } from "react";
-import { deleteJob, fetchJob, generateGreeting, scoreJob, sendGreeting, startGreeting } from "../../api/jobs";
+import { deleteJob, fetchJob, forceEnd, generateGreeting, scoreJob, sendGreeting, startGreeting } from "../../api/jobs";
 import { useAlertSound } from "../../hooks/useAlertSound";
-import { canGenerateGreeting, canOverrideGreetingThreshold, canStartGreeting } from "../../lib/jobStatus";
+import { canForceEnd, canGenerateGreeting, canOverrideGreetingThreshold, canStartGreeting, matchesListStatus } from "../../lib/jobStatus";
+import { jobKey, selectPageJobs, toggleSelectedJob } from "./jobSelection";
 
-export const jobKey = (job) => `${job.source_platform}:${job.source_job_id}`;
+export { jobKey } from "./jobSelection";
 
 export default function useJobBatch({ jobs, total, page, pageSize, query, statusFilter,
   onReload, onJobChange, loading, scoreThreshold }) {
   const [batchMode, setBatchMode] = useState(false);
-  const [selectedKeys, setSelectedKeys] = useState(new Set());
+  const [selectedByKey, setSelectedByKey] = useState(() => new Map());
   const [busy, setBusy] = useState("");
   const [progress, setProgress] = useState("");
   const [notice, setNotice] = useState("");
   const { playConfirmationAlert } = useAlertSound();
-  const selectedJobs = jobs.filter((job) => selectedKeys.has(jobKey(job)));
-  const allSelected = jobs.length > 0 && selectedJobs.length === jobs.length;
+  const selectedKeys = new Set(selectedByKey.keys());
+  const selectedJobs = [...selectedByKey.values()];
+  const allSelected = jobs.length > 0 && jobs.every((job) => selectedByKey.has(jobKey(job)));
 
-  useEffect(() => { setSelectedKeys(new Set()); setNotice(""); }, [page, query, statusFilter]);
+  useEffect(() => { setSelectedByKey(new Map()); setNotice(""); }, [query, statusFilter]);
 
   function toggle(job) {
-    setSelectedKeys((previous) => {
-      const next = new Set(previous);
+    setSelectedByKey((previous) => toggleSelectedJob(previous, job));
+  }
+
+  function selectAll(checked) {
+    setSelectedByKey((previous) => selectPageJobs(previous, jobs, checked));
+  }
+
+  function syncSelection(job) {
+    setSelectedByKey((previous) => {
       const key = jobKey(job);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (!previous.has(key)) return previous;
+      const next = new Map(previous);
+      if (matchesListStatus(job, statusFilter)) next.set(key, job);
+      else next.delete(key);
       return next;
     });
   }
 
-  function selectAll(checked) {
-    setSelectedKeys(checked ? new Set(jobs.map(jobKey)) : new Set());
-  }
-
   function close() {
     setBatchMode(false);
-    setSelectedKeys(new Set());
+    setSelectedByKey(new Map());
     setNotice("");
     setProgress("");
   }
@@ -47,6 +54,8 @@ export default function useJobBatch({ jobs, total, page, pageSize, query, status
     if (action === "score") {
       eligible = selectedJobs.filter((job) => ["scored", "greeting_ready"].includes(job.job_status)
         && job.greeting_send_state === "idle");
+    } else if (action === "end") {
+      eligible = selectedJobs.filter(canForceEnd);
     } else if (action === "start") {
       eligible = selectedJobs.filter((job) => canStartGreeting(job, scoreThreshold)
         || canOverrideGreetingThreshold(job, scoreThreshold));
@@ -57,12 +66,13 @@ export default function useJobBatch({ jobs, total, page, pageSize, query, status
         && job.greeting_send_state === "idle" && job.greeting?.trim());
     }
     const skipped = selectedJobs.length - eligible.length;
-    const labels = { delete: "删除", score: "评分", start: "流转到打招呼", generate: "生成招呼语", send: "发送招呼语" };
+    const labels = { delete: "删除", end: "结束", score: "评分", start: "流转到打招呼", generate: "生成招呼语", send: "发送招呼语" };
     if (!eligible.length) {
       setNotice(`所选岗位中没有可${labels[action]}的岗位。`);
       return;
     }
     if (action === "delete" && !window.confirm(`确定删除所选 ${selectedJobs.length} 个岗位吗？删除后可能再次采集入库。`)) return;
+    if (action === "end" && !window.confirm(`确定将 ${eligible.length} 个岗位标记为“已结束（强制中断）”吗？已发送的招呼语不会撤回。${skipped ? `另有 ${skipped} 个岗位将跳过。` : ""}`)) return;
     if (action === "score" && eligible.length && !window.confirm(`确定重新评分 ${eligible.length} 个岗位吗？岗位状态会根据新评分重置，未发送的招呼语草稿会清空。${skipped ? `另有 ${skipped} 个岗位将跳过。` : ""}`)) return;
     if (action === "start" && eligible.length && !window.confirm(
       `确定将 ${eligible.length} 个岗位流转到打招呼状态吗？${belowThreshold.length
@@ -84,12 +94,16 @@ export default function useJobBatch({ jobs, total, page, pageSize, query, status
         if (action === "delete") await deleteJob(job);
         else {
           const result = action === "score" ? await scoreJob(job)
+            : action === "end" ? await forceEnd(job)
             : action === "start" ? await startGreeting(job,
               canOverrideGreetingThreshold(job, scoreThreshold)
                 ? { allow_below_threshold: true } : {})
               : action === "generate" ? await generateGreeting(job)
                 : await sendGreeting(job, job.greeting);
-          if (result.job) onJobChange(result.job);
+          if (result.job) {
+            syncSelection(result.job);
+            onJobChange(result.job);
+          }
           if (result.error) throw new Error(result.error);
         }
         success += 1;
@@ -98,6 +112,7 @@ export default function useJobBatch({ jobs, total, page, pageSize, query, status
         if (action === "send") {
           try {
             refreshed = await fetchJob(job);
+            syncSelection(refreshed);
             onJobChange(refreshed);
           } catch { /* The reported error remains. */ }
         }
@@ -132,7 +147,7 @@ export default function useJobBatch({ jobs, total, page, pageSize, query, status
         : `${labels[action]}完成：成功 ${success}，跳过 ${skippedTotal}，失败 ${failures.length}。`;
       setNotice(summary + [...warnings, ...failures].slice(0, 2).join("；"));
       playConfirmationAlert();
-      setSelectedKeys(new Set());
+      setSelectedByKey(new Map());
       const nextPage = action === "delete"
         ? Math.min(page, Math.max(0, Math.ceil((total - success) / pageSize) - 1)) : page;
       await onReload(nextPage);
@@ -143,5 +158,5 @@ export default function useJobBatch({ jobs, total, page, pageSize, query, status
   }
 
   return { batchMode, setBatchMode, selectedKeys, selectedJobs, allSelected,
-    busy, progress, notice, toggle, selectAll, close, run };
+    busy, progress, notice, toggle, selectAll, syncSelection, close, run };
 }

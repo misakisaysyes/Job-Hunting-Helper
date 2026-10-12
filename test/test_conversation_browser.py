@@ -72,6 +72,23 @@ class ConversationBrowserTests(unittest.TestCase):
         rows.nth.assert_called_once_with(7)
         rows.nth.return_value.click.assert_called_once()
 
+    def test_exchange_open_selects_more_then_exchange_and_target_row(self):
+        browser, page, more, rows = self.adapter()
+        clicks = []
+        callbacks = []
+        page.on.side_effect = lambda event, listener: callbacks.append(listener)
+        more.click.side_effect = lambda **_: clicks.append("更多")
+        def select_exchange(**_):
+            clicks.append("有交换")
+            callbacks[0](friend_response([FRIEND]))
+        page.get_by_text.return_value.click.side_effect = select_exchange
+        self.assertTrue(browser.open_user_conversation(CHAT_URL, "123", "有交换"))
+        self.assertEqual(clicks, ["更多", "有交换"])
+        page.get_by_text.assert_called_once_with("有交换", exact=True)
+        rows.nth.return_value.click.assert_called_once()
+        page.wait_for_function.assert_called_once_with(
+            _BOSS_CHAT_ROW_MATCHES, arg={**IDENTITY, "selectedOnly": True}, timeout=8000)
+
     def test_open_waits_for_friend_identity_from_later_list_response(self):
         browser, page, _, rows = self.adapter(friends=[])
         callbacks = []

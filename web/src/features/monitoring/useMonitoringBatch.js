@@ -2,40 +2,44 @@ import { useEffect, useState } from "react";
 import { useAlertSound } from "../../hooks/useAlertSound";
 import { getMonitoringBatch, startMonitoringBatch } from "../../api/monitoring";
 import { executeMonitoringBatch, executeRecordedMonitoringBatch } from "./monitoringBatch";
+import { monitoringKey, selectPageConversations, toggleSelectedConversation } from "./monitoringSelection";
 
-export const monitoringKey = (item) => `${item.platform}:${item.conversation_id}`;
+export { monitoringKey } from "./monitoringSelection";
 
-export default function useMonitoringBatch({ items, page, filters, actions, onReload, loading, onTaskChange }) {
+export default function useMonitoringBatch({ items, page, filters, actions, onReload, loading, onTaskChange,
+  persistSelectionAcrossPages = false }) {
   const [batchMode, setBatchMode] = useState(false);
-  const [selectedKeys, setSelectedKeys] = useState(new Set());
+  const [selected, setSelected] = useState(new Map());
   const [busy, setBusy] = useState("");
   const [progress, setProgress] = useState("");
   const [notice, setNotice] = useState("");
   const [preview, setPreview] = useState(null);
   const { playConfirmationAlert } = useAlertSound();
-  const selectedItems = items.filter((item) => selectedKeys.has(monitoringKey(item)));
-  const allSelected = items.length > 0 && selectedItems.length === items.length;
+  const selectedKeys = new Set(selected.keys());
+  const currentItems = new Map(items.map((item) => [monitoringKey(item), item]));
+  const selectedItems = persistSelectionAcrossPages
+    ? [...selected].map(([key, item]) => currentItems.get(key) || item)
+    : items.filter((item) => selectedKeys.has(monitoringKey(item)));
+  const allSelected = items.length > 0 && items.every((item) => selectedKeys.has(monitoringKey(item)));
 
-  useEffect(() => { setSelectedKeys(new Set()); setNotice(""); }, [page, filters]);
+  useEffect(() => { setSelected(new Map()); setNotice(""); }, [filters]);
+  useEffect(() => {
+    if (!persistSelectionAcrossPages) { setSelected(new Map()); setNotice(""); }
+  }, [page, persistSelectionAcrossPages]);
 
   function toggle(item) {
-    setSelectedKeys((previous) => {
-      const next = new Set(previous);
-      const key = monitoringKey(item);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+    setSelected((previous) => toggleSelectedConversation(previous, item));
   }
 
   function selectAll(checked) {
-    setSelectedKeys(checked ? new Set(items.map(monitoringKey)) : new Set());
+    setSelected((previous) => selectPageConversations(
+      persistSelectionAcrossPages ? previous : new Map(), items, checked));
   }
 
   function close() {
     if (busy) return;
     setBatchMode(false);
-    setSelectedKeys(new Set());
+    setSelected(new Map());
     setNotice("");
     setProgress("");
     setPreview(null);
@@ -82,10 +86,10 @@ export default function useMonitoringBatch({ items, page, filters, actions, onRe
         setNotice(`${action.label}完成：成功 ${success}，跳过 ${skippedTotal}，失败 ${failures.length}。${failures.slice(0, 2).join("；")}`);
         playConfirmationAlert();
       }
-      setSelectedKeys(new Set());
+      setSelected(new Map());
       await onReload();
     } catch (cause) {
-      setNotice(cause.message || "批量任务请求失败，请刷新查看任务状态。");
+      setNotice(cause.message || "批量任务请求失败，列表会自动更新状态。");
       await onReload();
     } finally {
       setBusy("");

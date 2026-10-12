@@ -28,7 +28,8 @@ _BASIC_KEYS = {
     "profile": {"resume_path"},
     "ai": {"use_ai_score", "use_ai_greeting"},
     "monitoring": {"message_limit", "followup_enabled",
-                   "followup_days", "followup_unread", "followup_read_no_reply",
+                   "followup_days", "exchanged_active_days", "new_greetings_active_days",
+                   "followup_valid_days", "followup_unread", "followup_read_no_reply",
                    "followup_cooldown_hours", "followup_max_count", "followup_review_required",
                    "filter_review_required"},
 }
@@ -219,7 +220,9 @@ def _string_list(value: object, name: str) -> list[str]:
 
 def _validate_monitoring(config: dict) -> None:
     bounds = {"message_limit": (1, 1000),
-              "followup_days": (1, 30), "followup_cooldown_hours": (1, 720),
+              "followup_days": (1, 30), "exchanged_active_days": (1, 30),
+              "new_greetings_active_days": (1, 30), "followup_valid_days": (1, 365),
+              "followup_cooldown_hours": (1, 720),
               "followup_max_count": (1, 10)}
     for key, (lower, upper) in bounds.items():
         if type(config.get(key)) is not int or not lower <= config[key] <= upper:
@@ -242,7 +245,8 @@ def _validate_value(section: str, key: str, value: object) -> object:
         if type(value) is not bool:
             raise SettingsError(f"{name} 必须是开关值")
         return value
-    if key in {"message_limit", "followup_days",
+    if key in {"message_limit", "followup_days", "exchanged_active_days",
+               "new_greetings_active_days", "followup_valid_days",
                "followup_cooldown_hours", "followup_max_count"}:
         if type(value) is not int or value < 1 or value > 1000:
             raise SettingsError(f"{name} 必须是 1～1000 的整数")

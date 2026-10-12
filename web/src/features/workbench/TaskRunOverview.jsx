@@ -1,4 +1,5 @@
-import { BatchTaskMetrics, ScanTaskMetrics } from "../monitoring/MonitoringTaskMetrics";
+import { ScanTaskMetrics } from "../monitoring/MonitoringTaskMetrics";
+import { MONITORING_PHASES, monitoringRunsForPhase } from "./monitoringRuns";
 
 const RUN_LABELS = {
   running: "执行中", completed: "已完成", completed_with_shortage: "部分完成",
@@ -23,9 +24,9 @@ function formatTime(value, showDate = false) {
   }).format(date);
 }
 
-function Metrics({ type, counts, daily = false, status, empty = false }) {
-  if (type === "monitoring") return <ScanTaskMetrics counts={counts} empty={empty} />;
-  if (type.startsWith("monitoring_")) return <BatchTaskMetrics type={type} counts={counts} status={status} />;
+function Metrics({ type, counts, daily = false, empty = false, phase }) {
+  if (type === "monitoring") return <ScanTaskMetrics counts={counts} empty={empty}
+    phase={phase} showTitle={!phase} />;
   return <div className="workbench-run-metrics">
     {METRICS[type].filter(([key]) => !(daily && type === "collection" && key === "duplicate_jobs") &&
       (key !== "ai_scored" || Object.prototype.hasOwnProperty.call(counts || {}, key)))
@@ -38,7 +39,7 @@ function Metrics({ type, counts, daily = false, status, empty = false }) {
   </div>;
 }
 
-function RunEntries({ type, history, historical }) {
+function RunEntries({ type, history, historical, phase }) {
   return <div className="workbench-run-history">
     {history.map((run) => <div className="workbench-run-entry" key={run.id}>
       <div className="workbench-run-entry-head">
@@ -47,7 +48,7 @@ function RunEntries({ type, history, historical }) {
         <span className={`workbench-run-status ${run.status}`}>{RUN_LABELS[run.status] || run.status}</span>
       </div>
       <p>{run.message || "—"}</p>
-      {Object.keys(run.counts || {}).length > 0 && <Metrics type={type} counts={run.counts} status={run.status} />}
+      {Object.keys(run.counts || {}).length > 0 && <Metrics type={type} counts={run.counts} phase={phase} />}
     </div>)}
   </div>;
 }
@@ -79,32 +80,30 @@ function RunCard({ type, title, bucket, current, active, onOpen, historical = fa
   </article>;
 }
 
-const MONITORING_TASKS = [
-  ["monitoring", "扫描会话"], ["monitoring_followup", "批量追问"], ["monitoring_delete", "批量删除会话"],
-];
-
 function MonitoringRunCard({ data, historical, onOpen }) {
-  const active = MONITORING_TASKS.some(([type]) => data?.active?.[type]);
-  const runs = MONITORING_TASKS.reduce((sum, [type]) => sum + (data?.[type]?.runs || 0), 0);
+  const bucket = data?.monitoring;
+  const active = Boolean(data?.active?.monitoring);
+  const runs = bucket?.runs || 0;
+  const history = bucket?.history || [];
+  const current = data?.current?.monitoring;
   return <article className="workbench-run-card">
     <div className="workbench-run-heading">
       <div><h3>监测任务</h3><p>{historical ? "当日" : "今日"}执行 <strong>{runs}</strong> 次</p></div>
       {!historical && <span className={`workbench-run-status ${active ? "running" : "idle"}`}>{active ? "正在执行" : "当前未运行"}</span>}
     </div>
-    {MONITORING_TASKS.map(([type, title]) => {
-      const bucket = data?.[type];
-      const history = bucket?.history || [];
-      const running = history.some((run) => run.status === "running");
-      const current = data?.current?.[type];
-      return <section className="workbench-monitoring-task" key={type} aria-label={title}>
+    {MONITORING_PHASES.map(({ phase, title }) => {
+      const phaseHistory = monitoringRunsForPhase(history, phase);
+      const phaseActive = active && (!current?.phase || current.phase === "all"
+        ? phase !== "exchanged" : current.phase === phase);
+      return <section className="workbench-monitoring-task" key={phase} aria-label={title}>
         <div className="workbench-run-history-head"><h4>{title}</h4>
-          {type === "monitoring" && onOpen && <button type="button" onClick={onOpen}>查看监测任务</button>}
+          {phase === "communicated" && onOpen && <button type="button" onClick={onOpen}>查看监测任务</button>}
         </div>
-        {data?.active?.[type] && <p className="workbench-run-active" role="status">{current?.message || "执行中"}</p>}
-        <Metrics type={type} counts={bucket?.totals} daily empty={!bucket?.runs} status={running ? "running" : "completed"} />
-        {history.length ? <details className="workbench-task-records">
-          <summary>执行记录（{bucket.runs} 次）</summary>
-          <RunEntries type={type} history={history} historical={historical} />
+        {phaseActive && <p className="workbench-run-active" role="status">{current?.message || "执行中"}</p>}
+        <Metrics type="monitoring" counts={bucket?.totals} phase={phase} empty={!phaseHistory.length} />
+        {phaseHistory.length ? <details className="workbench-task-records">
+          <summary>执行记录（{phaseHistory.length} 次）</summary>
+          <RunEntries type="monitoring" history={phaseHistory} historical={historical} phase={phase} />
         </details> : <p className="workbench-run-empty">{historical ? "当日没有执行记录。" : "今天还没有执行记录。"}</p>}
       </section>;
     })}

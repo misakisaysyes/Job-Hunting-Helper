@@ -76,6 +76,7 @@
   background: #fbfcfe;
 }
 .config-module-heading { margin-bottom: 17px; }
+.config-module-no-fields .config-module-heading { margin-bottom: 0; }
 .config-module-heading h3,
 .config-module-heading h4 {
   margin: 0;
@@ -99,6 +100,7 @@
 .config-decision-card + .config-decision-card { padding-top: 22px; border-top: 1px solid #e2e8f0; }
 .config-decision-card h4 { margin: 0 0 14px; color: #2d4561; font-size: 13px; }
 .config-decision-card .config-fields { grid-template-columns: minmax(0, 1fr); gap: 14px; max-width: 850px; }
+.config-ai-score-note { margin: 0; padding: 10px 12px; border-radius: 7px; background: #edf5ff; color: #35618f; font-size: 12px; line-height: 1.6; }
 .config-branch {
   margin-top: 22px;
   padding-top: 20px;

@@ -16,15 +16,12 @@ const STATUS = {
 };
 
 export default function FilterCandidateList({ candidates, total, page, pageSize, loading,
-  onPage, onRefresh, onAction, onOpen, onDelete, openingCandidate, busy, busyDelete, filtered, batch, onBatchModeChange }) {
+  onPage, onAction, onOpen, onDelete, openingCandidate, busy, busyDelete, filtered, batch, onBatchModeChange }) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min(total, (page + 1) * pageSize);
   return <section className="panel" aria-label="「新招呼」会话列表中的过滤候选">
     <div className="panel-head"><span>过滤候选</span><span className="range">{total ? `${start}–${end} / ${total}` : "暂无记录"}</span></div>
     <div className="monitoring-batch-toolbar"><button type="button" className="toolbar-button"
-      disabled={loading || Boolean(batch.busy) || Boolean(busy)} onClick={onRefresh}>
-      {loading ? "刷新中…" : "刷新列表"}
-    </button><button type="button" className="toolbar-button"
       disabled={loading || Boolean(batch.busy) || Boolean(busy)}
       onClick={() => onBatchModeChange(!batch.batchMode)}>
       {batch.batchMode ? "退出批量操作" : "批量操作"}

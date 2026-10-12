@@ -1,11 +1,43 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { canGenerateGreeting, canOverrideGreetingThreshold, canStartGreeting, greetingSendIssue } from "./jobStatus.js";
+import { canForceEnd, canGenerateGreeting, canOverrideGreetingThreshold, canStartGreeting, greetingSendIssue, jobScoreInfo,
+  matchesListStatus } from "./jobStatus.js";
 
 const job = {
   job_status: "scored", greeting_send_state: "idle",
   ai_score_status: "scored", ai_score: 71,
 };
+
+test("prefiltered jobs show 100 points as a prefilter score", () => {
+  assert.deepEqual(jobScoreInfo({ ai_score_status: "not_scored", ai_score: null }, 71), {
+    text: "100 分", note: "预筛已评分", className: "score qualified",
+  });
+  assert.deepEqual(jobScoreInfo({ ai_score_status: "scored", ai_score: 82 }, 71), {
+    text: "82 分", className: "score qualified",
+  });
+  assert.deepEqual(jobScoreInfo({ ai_score_status: "score_failed", ai_score: null }, 71), {
+    text: "评分失败", className: "score neutral",
+  });
+});
+
+test("changed jobs leave the current status list immediately", () => {
+  const jobs = [
+    { id: "scored", job_status: "scored" },
+    { id: "ready", job_status: "greeting_ready" },
+    { id: "greeted", job_status: "greeted" },
+    { id: "monitoring", job_status: "monitoring" },
+    { id: "ended", job_status: "ended_forced" },
+  ];
+  assert.deepEqual(jobs.filter((item) => matchesListStatus(item, "greeting_ready"))
+    .map((item) => item.id), ["ready"]);
+  const changed = jobs.map((item) => item.id === "ready"
+    ? { ...item, job_status: "greeted" } : item);
+  assert.deepEqual(changed.filter((item) => matchesListStatus(item, "greeting_ready")), []);
+  assert.deepEqual(changed.filter((item) => matchesListStatus(item, "greeted"))
+    .map((item) => item.id), ["ready", "greeted", "monitoring"]);
+  assert.deepEqual(changed.filter((item) => matchesListStatus(item, "ended"))
+    .map((item) => item.id), ["ended"]);
+});
 
 test("batch greeting transitions include qualifying scores and skip low or failed scores", () => {
   const jobs = [
@@ -60,6 +92,15 @@ test("greeting generation includes unscored jobs but skips inactive or locked jo
   ];
   assert.deepEqual(jobs.filter(canGenerateGreeting).map((item) => item.id),
     ["unscored", "scored", "failed"]);
+});
+
+test("batch ending uses the same allowed states as single-job ending", () => {
+  const statuses = ["scored", "greeting_ready", "greeted", "ended_forced"];
+  assert.deepEqual(statuses.filter((job_status) => canForceEnd({ job_status, greeting_send_state: "idle" })),
+    ["scored", "greeting_ready"]);
+  assert.equal(canForceEnd({ job_status: "greeting_ready", greeting_send_state: "sending" }), false);
+  assert.equal(canForceEnd({ job_status: "greeting_ready", greeting_send_state: "sent" }), false);
+  assert.equal(canForceEnd({ job_status: "greeted", greeting_send_state: "sent" }), false);
 });
 
 test("job rows show persisted send failures but do not mislabel uncertain or sent greetings", () => {

@@ -71,15 +71,15 @@ export const CONFIG_SECTIONS = [
     ],
   },
   {
-    key: "monitoring", title: "监测任务", description: "设置「仅沟通」追问和「新招呼」过滤规则。",
+    key: "monitoring", title: "监测任务", description: "按已沟通、有交换、新会话分别查看对应任务的配置。",
     groups: [
-      { key: "scan", title: "扫描范围", description: "从「仅沟通」中最近活动的会话开始读取。",
-        fields: ["monitoring.message_limit", "monitoring.followup_days"] },
-      { key: "followup", title: "追问", description: "按回执、冷却时间与次数筛选；重复发送原招呼语。",
-        fields: ["monitoring.followup_enabled", "monitoring.followup_types", "monitoring.followup_cooldown_hours",
-          "monitoring.followup_max_count"] },
-      { key: "filter", title: "新招呼过滤", description: "公司命中岗位预筛的公司排除词时，审核后从 BOSS 消息列表删除。",
-        fields: ["monitoring.filter_review_required"] },
+      { key: "communicated", title: "已沟通", description: "扫描 BOSS「仅沟通」中的会话，并设置追问范围、冷却时间与次数。",
+        fields: ["monitoring.message_limit", "monitoring.followup_days", "monitoring.followup_enabled", "monitoring.followup_valid_days",
+          "monitoring.followup_types", "monitoring.followup_cooldown_hours", "monitoring.followup_max_count"] },
+      { key: "exchanged", title: "有交换", description: "从 BOSS「更多 → 有交换」读取会话，不打开会话，池外岗位保持池外。",
+        fields: ["monitoring.exchanged_active_days"] },
+      { key: "new_greetings", title: "新会话", description: "扫描 BOSS「新招呼」；公司命中排除词时，可选择先审核再删除。",
+        fields: ["monitoring.new_greetings_active_days", "monitoring.filter_review_required"] },
     ],
   },
 ];
