@@ -387,10 +387,10 @@ export default function MonitoringPage() {
       {taskError && <div className="error" role="alert">{taskError}</div>}
 
       <div className="section-heading monitoring-section-heading">
-        <div><h2>会话进展</h2>
+        <div><h2>「仅沟通」会话列表</h2>
           <p>查看「仅沟通」中未读或已读未回会话的追问进展、入库和更新时间。</p></div>
       </div>
-      <div className="monitoring-filters monitoring-conversation-filters" aria-label="会话进展筛选">
+      <div className="monitoring-filters monitoring-conversation-filters" aria-label="「仅沟通」会话列表筛选">
         <input type="search" aria-label="搜索会话" placeholder="搜索岗位、公司、HR 或会话 ID"
           disabled={Boolean(conversationBatch.busy)}
           value={conversationSearch} onChange={(event) => { setPage(0); setConversationSearch(event.target.value); }} />
@@ -456,10 +456,10 @@ export default function MonitoringPage() {
         </section>
       </div>}
       <div className="section-heading monitoring-section-heading">
-        <div><h2>新招呼过滤</h2>
-          <p>扫描时只读取「新招呼」列表；确认删除后会先打开目标会话，再从菜单删除。打开会话可能清除未读标记。</p></div>
+        <div><h2>「新招呼」会话列表</h2>
+          <p>仅展示「新招呼」中命中公司排除词的会话；确认删除后会先打开目标会话，再从菜单删除。打开会话可能清除未读标记。</p></div>
       </div>
-      <div className="monitoring-filters monitoring-filter-candidates" aria-label="新招呼过滤筛选">
+      <div className="monitoring-filters monitoring-filter-candidates" aria-label="「新招呼」会话列表筛选">
         <input type="search" aria-label="搜索过滤候选" placeholder="搜索公司、HR、岗位、排除词或会话 ID"
           disabled={Boolean(filterBatch.busy)}
           value={filterSearch} onChange={(event) => { setFilterPage(0); setFilterSearch(event.target.value); }} />

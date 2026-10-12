@@ -16,7 +16,7 @@ export default function ConversationList({ conversations, total, page, pageSize,
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min(total, (page + 1) * pageSize);
   return (
-    <section className="panel" aria-label="会话列表">
+    <section className="panel" aria-label="「仅沟通」会话列表">
       <div className="panel-head"><span>会话列表</span><span className="range">{total ? `${start}–${end} / ${total}` : "暂无记录"}</span></div>
       <div className="monitoring-batch-toolbar"><button type="button" className="toolbar-button"
         disabled={loading || Boolean(batch.busy) || Boolean(busyAction)} onClick={onRefresh}>
