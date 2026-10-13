@@ -76,7 +76,7 @@ export const FIELD_HELP = {
   "ai.greeting_template": "选填；采集时填入符合条件的岗位，发送前仍可编辑。最多 300 字，留空则手动填写。",
   "ai.ai_api_concurrency": "线程池在服务启动时建立；点击生效配置后会自动重启 API 服务。",
   "safety.state_db": "点击生效配置后会自动重启 API 服务并使用新数据库。",
-  "monitoring.followup_days": "只扫描「仅沟通」中最近 X 天有活动的会话。",
+  "monitoring.followup_days": "只扫描「仅沟通」中最近 X×24 小时有活动的会话，从每次扫描开始时刻向前计算。",
   "monitoring.followup_valid_days": "从会话首次入库时间起算；超过设置天数后不可追问，即使最近仍有活动。范围 1～365 天。",
   "monitoring.exchanged_active_days": "只读取 BOSS「有交换」列表中最近 X 天有活动的会话；范围 1～30 天。",
   "monitoring.new_greetings_active_days": "只读取 BOSS「新招呼」列表中最近 X 天有活动的会话；范围 1～30 天。",

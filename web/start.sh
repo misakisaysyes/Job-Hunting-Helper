@@ -66,7 +66,8 @@ if ! "$python_bin" -c 'import patchright, httpx, fontTools' >/dev/null 2>&1; the
   "$python_bin" -m pip install -r "$project_dir/requirements.txt"
 fi
 
-if [[ -z "${DEEPSEEK_API_KEY:-}" && -f "$boss_credentials" ]]; then
+if [[ -z "${DEEPSEEK_API_KEY:-}" && ! -f "$project_dir/.config.credentials.yaml" \
+      && ! -f "$project_dir/.state/ai-api-key" && -f "$boss_credentials" ]]; then
   deepseek_key="$($python_bin - "$boss_credentials" <<'PY'
 from pathlib import Path
 import re

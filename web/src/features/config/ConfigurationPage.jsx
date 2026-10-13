@@ -236,8 +236,8 @@ export default function ConfigurationPage() {
         <input id="config-ai-api-key" name="ai.api_key" type="password" autoComplete="new-password"
           value={apiKeyInput} placeholder={apiKeyConfigured ? "已保存；输入新 Key 可替换" : "输入 API Key"}
           onChange={(event) => { setApiKeyInput(event.target.value); setDirty(true); setNotice(null); }} />
-        <p>{apiKeyConfigured ? "本地已保存 Key，页面不会显示原文。留空表示保持原值。"
-          : "填写后保存并点击生效配置；也可以继续使用环境变量。"}</p>
+        <p>{apiKeyConfigured ? "Key 已保存在本项目的 .config.credentials.yaml，页面不会显示原文。留空表示保持原值。"
+          : "填写后保存到本项目的 .config.credentials.yaml，再点击生效配置；也可以继续使用环境变量。"}</p>
       </div>;
     }
     const original = settings[section][name];

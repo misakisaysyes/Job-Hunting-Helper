@@ -87,6 +87,11 @@ def _tab_friends(page: Any, tab_label: str | None, active_days: int | None,
     """Read a whole BOSS list tab without opening a conversation."""
     friends: dict[str, dict[str, Any]] = {}
 
+    def identity(row: dict[str, Any]) -> tuple[str, str, str]:
+        return (str(row.get("avatar") or "").split("?", 1)[0],
+                str(row.get("name") or "").strip(),
+                str(row.get("brandName") or "").strip())
+
     def collect_response(response: Any) -> None:
         if "/wapi/zprelation/friend/getGeekFriendList.json" not in response.url:
             return
@@ -110,22 +115,28 @@ def _tab_friends(page: Any, tab_label: str | None, active_days: int | None,
         raise RuntimeError("BOSS 会话页未正常打开，请检查登录状态")
     page.locator(".friend-content").first.wait_for(state="attached", timeout=15000)
     page.wait_for_timeout(1200)
-    visible_avatars: set[str] = set()
-    receipt_by_avatar: dict[str, str] = {}
+    visible_identities: set[tuple[str, str, str]] = set()
+    current_identities: set[tuple[str, str, str]] = set()
+    receipt_by_identity: dict[tuple[str, str, str], str] = {}
 
-    def capture_visible_avatars() -> None:
+    def capture_visible_rows() -> None:
+        nonlocal current_identities
         visible = page.evaluate("""() => [...document.querySelectorAll('.friend-content')]
             .map(item => {
                 const avatar = item.querySelector('img.image-circle')?.src.split('?')[0];
+                const name = item.querySelector('.name-text')?.textContent?.trim();
+                const brandName = item.querySelector('.name-box > span:nth-child(2)')?.textContent?.trim();
                 const receipt = item.querySelector('.last-msg .message-status');
                 const status = receipt?.classList.contains('status-read') ? 'read_no_reply'
                     : receipt?.classList.contains('status-delivery') ? 'unread' : '';
-                return {avatar, status};
-            }).filter(item => item.avatar)""")
+                return {avatar, name, brandName, status};
+            }).filter(item => item.avatar && item.name && item.brandName)""")
+        current_identities = set()
         for item in visible:
-            avatar = item["avatar"]
-            visible_avatars.add(avatar)
-            receipt_by_avatar[avatar] = item["status"]
+            key = identity(item)
+            current_identities.add(key)
+            visible_identities.add(key)
+            receipt_by_identity[key] = item["status"]
 
     if tab_label:
         if tab_label == "有交换":
@@ -138,17 +149,16 @@ def _tab_friends(page: Any, tab_label: str | None, active_days: int | None,
         page.wait_for_timeout(1000)
         if tab_label != "有交换" and "selected" not in (tab_button.get_attribute("class") or "").split():
             raise RuntimeError(f"未能切换到 BOSS「{tab_label}」标签")
-        capture_visible_avatars()
+        capture_visible_rows()
     cutoff_ms = (int((datetime.now(timezone.utc) - timedelta(days=active_days)).timestamp() * 1000)
                  if active_days is not None else None)
     idle_rounds = 0
     while idle_rounds < 3:
-        visible_count = len(visible_avatars) if tab_label else len(friends)
+        visible_count = len(visible_identities) if tab_label else len(friends)
         if cutoff_ms is not None:
             visible_rows = [row for row in friends.values()
-                            if not tab_label or str(row.get("avatar") or "").split("?", 1)[0]
-                            in visible_avatars]
-            if visible_rows and min(int(row.get("lastTS") or 0) for row in visible_rows) < cutoff_ms:
+                            if not tab_label or identity(row) in current_identities]
+            if visible_rows and max(int(row.get("lastTS") or 0) for row in visible_rows) < cutoff_ms:
                 break
         page.evaluate("""() => {
             const list = document.querySelector('.user-list-content');
@@ -156,26 +166,33 @@ def _tab_friends(page: Any, tab_label: str | None, active_days: int | None,
         }""")
         page.wait_for_timeout(700)
         if tab_label:
-            capture_visible_avatars()
-        new_count = len(visible_avatars) if tab_label else len(friends)
+            capture_visible_rows()
+        new_count = len(visible_identities) if tab_label else len(friends)
         if on_progress and new_count != visible_count:
             on_progress(f"已扫描「{tab_label or '全部'}」列表 {new_count} 条")
         idle_rounds = idle_rounds + 1 if new_count == visible_count else 0
+    if tab_label and visible_identities:
+        # BOSS renders list rows before its friend-details response arrives. Give
+        # the last visible batch time to resolve before matching row identities.
+        for _ in range(12):
+            known = {identity(row) for row in friends.values()}
+            if visible_identities <= known:
+                break
+            page.wait_for_timeout(250)
     candidates = list(friends.values())
     if tab_label:
-        avatar_counts: dict[str, int] = {}
+        identity_counts: dict[tuple[str, str, str], int] = {}
         for row in candidates:
-            avatar = str(row.get("avatar") or "").split("?", 1)[0]
-            avatar_counts[avatar] = avatar_counts.get(avatar, 0) + 1
+            key = identity(row)
+            identity_counts[key] = identity_counts.get(key, 0) + 1
         candidates = [row for row in candidates
-                      if (avatar := str(row.get("avatar") or "").split("?", 1)[0])
-                      in visible_avatars and avatar_counts[avatar] == 1]
+                      if (key := identity(row)) in visible_identities
+                      and identity_counts[key] == 1]
     selected = sorted(candidates, key=lambda row: int(row.get("lastTS") or 0), reverse=True)
     if cutoff_ms is not None:
         selected = [row for row in selected if int(row.get("lastTS") or 0) >= cutoff_ms]
     if tab_label == "仅沟通":
-        selected = [{**row, "list_receipt_status": receipt_by_avatar.get(
-            str(row.get("avatar") or "").split("?", 1)[0], "")}
+        selected = [{**row, "list_receipt_status": receipt_by_identity.get(identity(row), "")}
                     for row in selected]
     return selected
 

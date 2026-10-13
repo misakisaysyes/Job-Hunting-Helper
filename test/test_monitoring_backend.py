@@ -245,8 +245,10 @@ class MonitoringBackendTests(unittest.TestCase):
         now = datetime.now(timezone.utc)
         friends = [
             {"uid": "new", "avatar": "https://example.invalid/new.png",
+             "name": "甲女士", "brandName": "甲公司",
              "lastTS": int((now - timedelta(days=2)).timestamp() * 1000)},
             {"uid": "old", "avatar": "https://example.invalid/old.png",
+             "name": "乙先生", "brandName": "乙公司",
              "lastTS": int((now - timedelta(days=8)).timestamp() * 1000)},
         ]
         for tab_label in ("有交换", "新招呼"):
@@ -257,11 +259,43 @@ class MonitoringBackendTests(unittest.TestCase):
                     url="https://www.zhipin.com/wapi/zprelation/friend/getGeekFriendList.json",
                     json=lambda: {"code": 0, "zpData": {"result": friends}}))
                 page.evaluate.side_effect = lambda expression: (
-                    [{"avatar": row["avatar"], "status": ""} for row in friends]
+                    [{"avatar": row["avatar"], "name": row["name"],
+                      "brandName": row["brandName"], "status": ""} for row in friends]
                     if "querySelectorAll('.friend-content')" in expression else None)
                 page.locator.return_value.filter.return_value.first.get_attribute.return_value = "selected"
                 rows = _tab_friends(page, tab_label, 4)
                 self.assertEqual([row["uid"] for row in rows], ["new"])
+
+    def test_shared_default_avatar_does_not_hide_recent_communication_rows(self) -> None:
+        now = datetime.now(timezone.utc)
+        avatar = "https://example.invalid/default.png"
+        friends = [
+            {"uid": "today", "avatar": avatar, "name": "甲女士", "brandName": "甲公司",
+             "lastTS": int(now.timestamp() * 1000)},
+            {"uid": "three_days", "avatar": avatar, "name": "乙女士", "brandName": "乙公司",
+             "lastTS": int((now - timedelta(days=3)).timestamp() * 1000)},
+            {"uid": "stale", "avatar": avatar, "name": "丙女士", "brandName": "丙公司",
+             "lastTS": int((now - timedelta(days=7)).timestamp() * 1000)},
+        ]
+        page = MagicMock()
+        page.url = CHAT_URL
+        page.on.side_effect = lambda _event, callback: callback(MagicMock(
+            url="https://www.zhipin.com/wapi/zprelation/friend/getGeekFriendList.json",
+            json=lambda: {"code": 0, "zpData": {"result": friends}}))
+        snapshots = iter((friends[:1], friends[:2], friends))
+
+        def evaluate(expression):
+            if "querySelectorAll('.friend-content')" not in expression:
+                return None
+            return [{"avatar": row["avatar"], "name": row["name"],
+                     "brandName": row["brandName"], "status": "unread"}
+                    for row in next(snapshots, friends)]
+
+        page.evaluate.side_effect = evaluate
+        page.locator.return_value.filter.return_value.first.get_attribute.return_value = "selected"
+        rows = _tab_friends(page, "仅沟通", 4)
+        self.assertEqual([row["uid"] for row in rows], ["today", "three_days"])
+        self.assertEqual([row["list_receipt_status"] for row in rows], ["unread", "unread"])
 
     def test_terminated_conversation_is_not_opened_or_reactivated(self) -> None:
         conversation = {"platform": "boss", "conversation_id": "1", "judgment": "unread"}

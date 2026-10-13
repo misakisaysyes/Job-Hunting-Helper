@@ -113,8 +113,6 @@
 .conversion-metrics strong { color: #253953; font-size: 21px; line-height: 1.1; }
 .conversion-metrics .conversion-rate { background: #eaf7f2; }
 .conversion-metrics .conversion-rate strong { color: #17815f; }
-.conversion-route-summary { margin: 2px 0 10px; color: #526780; font-size: 13px; }
-.conversion-route-summary strong { color: #178f75; font-size: 16px; }
 .conversion-chart-frame { position: relative; }
 .conversion-chart-scroll { overflow-x: auto; }
 .conversion-chart { display: block; min-width: 760px; width: 100%; height: auto; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
@@ -139,7 +137,23 @@
 .conversion-link-tooltip-value strong { color: #1c719d; font-size: 18px; }
 .conversion-column-title { fill: #8796a9; font-size: 13px; font-weight: 700; }
 .conversion-node-label { fill: #344860; font-size: 12px; font-weight: 650; }
-.conversion-note { margin: 4px 0 0; color: #718197; font-size: 12px; line-height: 1.7; }
+.conversion-basis { margin-top: 12px; }
+.conversion-basis-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: #1978e6;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.conversion-basis-toggle:hover { text-decoration: underline; }
+.conversion-basis-toggle:focus-visible { outline: 2px solid #77abe0; outline-offset: 3px; }
+.conversion-note { margin-top: 6px; color: #718197; font-size: 12px; line-height: 1.7; }
+.conversion-note p { margin: 3px 0; }
 .conversion-message { margin: 24px 0; color: #718197; font-size: 13px; }
 .conversion-message.error { color: #bf433f; }
 

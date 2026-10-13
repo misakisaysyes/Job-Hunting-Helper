@@ -17,9 +17,11 @@ class ApiKeySettingsTests(unittest.TestCase):
     def test_save_redacts_key_until_apply(self):
         with TemporaryDirectory() as directory:
             config_path = Path(directory) / "user-config.json"
-            key_path = Path(directory) / "ai-api-key"
+            key_path = Path(directory) / ".config.credentials.yaml"
+            legacy_path = Path(directory) / "ai-api-key"
             with patch("api.settings.USER_CONFIG_PATH", config_path), \
                     patch.object(credentials, "API_KEY_PATH", key_path), \
+                    patch.object(credentials, "LEGACY_API_KEY_PATH", legacy_path), \
                     patch.object(credentials, "_active_key", ""), \
                     patch.dict(DEFAULT_CONFIG["collection"], {"encrypt_expect_id": ["test-id"]}), \
                     patch.dict(os.environ, {"DEEPSEEK_API_KEY": ""}):
@@ -28,7 +30,8 @@ class ApiKeySettingsTests(unittest.TestCase):
                 self.assertTrue(saved["pending_apply"])
                 self.assertNotIn("sk-local-test", json.dumps(saved))
                 self.assertNotIn("sk-local-test", config_path.read_text(encoding="utf-8"))
-                self.assertEqual(key_path.read_text(encoding="utf-8"), "sk-local-test")
+                self.assertEqual(key_path.read_text(encoding="utf-8"),
+                                 'ai:\n  api_key: "sk-local-test"\n')
                 self.assertEqual(key_path.stat().st_mode & 0o777, 0o600)
                 self.assertEqual(credentials.current_api_key("DEEPSEEK_API_KEY"), "")
 
@@ -42,6 +45,18 @@ class ApiKeySettingsTests(unittest.TestCase):
                     self.assertEqual(call_model(DEFAULT_CONFIG, "系统要求", "岗位信息"), "完成")
                 self.assertEqual(request.call_args.kwargs["headers"]["Authorization"],
                                  "Bearer sk-local-test")
+
+    def test_legacy_key_migrates_to_project_credentials(self):
+        with TemporaryDirectory() as directory:
+            key_path = Path(directory) / ".config.credentials.yaml"
+            legacy_path = Path(directory) / "ai-api-key"
+            legacy_path.write_text("sk-legacy-test", encoding="utf-8")
+            with patch.object(credentials, "API_KEY_PATH", key_path), \
+                    patch.object(credentials, "LEGACY_API_KEY_PATH", legacy_path):
+                credentials._migrate_legacy_key()
+                self.assertFalse(legacy_path.exists())
+                self.assertEqual(credentials._read_saved_key(), "sk-legacy-test")
+                self.assertEqual(key_path.stat().st_mode & 0o777, 0o600)
 
 
 if __name__ == "__main__":

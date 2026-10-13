@@ -3,8 +3,8 @@ import { generateConversionFlow, getSavedConversionFlow } from "../../api/tasks"
 import { buildConversionLayout } from "./conversionLayout";
 
 const LABELS = {
-  "source:greeted": "已招呼 · 池内",
-  "source:hr_initiated": "HR 主动联系 · 池外",
+  "source:greeted": "主动投递 · 池内",
+  "source:hr_initiated": "HR 联系 · 池外",
   "source:earlier_or_unknown": "期前或未关联",
   "followup:true": "已追问",
   "delivery:true": "有交换",
@@ -50,6 +50,7 @@ export default function ConversionSankey() {
   const [loading, setLoading] = useState(false);
   const [restoring, setRestoring] = useState(true);
   const [hoveredLink, setHoveredLink] = useState(null);
+  const [basisExpanded, setBasisExpanded] = useState(false);
   const chartFrameRef = useRef(null);
   const today = shanghaiDate();
 
@@ -71,14 +72,12 @@ export default function ConversionSankey() {
   const layout = useMemo(() => buildConversionLayout(data?.flows || []), [data]);
   const confirmedDeliveryBasis = data?.basis_version === 5;
   const labels = confirmedDeliveryBasis ? {
-    ...LABELS, "delivery:true": "附件简历已发送", "delivery:false": "未确认附件简历发送",
+    ...LABELS, "delivery:true": "简历投递成功", "delivery:false": "简历投递失败",
   } : LABELS;
   const greetedContacts = (data?.flows || []).filter((flow) => flow.source === "greeted")
     .reduce((sum, flow) => sum + flow.count, 0);
   const greetedDelivered = (data?.flows || []).filter((flow) => flow.source === "greeted" && flow.delivered)
     .reduce((sum, flow) => sum + flow.count, 0);
-  const directOutsideExchange = (data?.flows || []).filter((flow) => flow.source === "hr_initiated"
-    && !flow.followed_up && flow.delivered).reduce((sum, flow) => sum + flow.count, 0);
   const conversion = greetedContacts ? Math.round(greetedDelivered / greetedContacts * 100) : 0;
   const missingRange = !start || !end;
   const invalidRange = start && end && start > end;
@@ -140,18 +139,16 @@ export default function ConversionSankey() {
         <span>生成时间：{formatGeneratedAt(data.generated_at)}（北京时间）</span>
       </div>}
       {data ? <><div className="conversion-metrics">
-        <div><span>已招呼 · 池内</span><strong>{data?.metrics?.greeted ?? "—"}</strong></div>
-        <div><span>HR 主动联系 · 池外</span><strong>{data?.metrics?.hr_initiated ?? "—"}</strong></div>
+        <div><span>主动投递 · 池内</span><strong>{data?.metrics?.greeted ?? "—"}</strong></div>
+        <div><span>HR 联系 · 池外</span><strong>{data?.metrics?.hr_initiated ?? "—"}</strong></div>
         <div><span>已追问</span><strong>{data?.metrics?.followups ?? "—"}</strong></div>
-        <div><span>{confirmedDeliveryBasis ? "已投递 · 附件简历已发送" : "有交换（投递线索）"}</span>
+        <div><span>{confirmedDeliveryBasis ? "简历投递成功" : "有交换（投递线索）"}</span>
           <strong>{data?.metrics?.deliveries ?? "—"}</strong></div>
         <div className="conversion-rate"><span>{confirmedDeliveryBasis ? "已招呼转投递" : "已招呼转有交换"}</span>
           <strong>{greetedContacts ? `${conversion}%` : "—"}</strong></div>
       </div>
       {layout.total === 0 ? <div className="conversion-message">该统计时间段内暂无招呼、追问或有交换记录。</div>
-          : <><p className="conversion-route-summary">池外未经追问直接{confirmedDeliveryBasis ? "投递" : "到有交换"}：
-            <strong>{directOutsideExchange}</strong> 条</p>
-            <div className="conversion-chart-frame" ref={chartFrameRef}>
+          : <div className="conversion-chart-frame" ref={chartFrameRef}>
             <div className="conversion-chart-scroll"><svg className="conversion-chart" viewBox="0 0 1000 370"
             role="img" aria-label={`${data.start_date} 至 ${data.end_date} 的转化桑基图，共 ${layout.total} 个关联对象，已招呼 ${data.metrics.greeted} 个岗位，已追问 ${data.metrics.followups} 条会话，${confirmedDeliveryBasis ? "附件简历已发送" : "有交换"} ${data.metrics.deliveries} 条会话`}>
             <text className="conversion-column-title" x="142" y="25">来源</text>
@@ -185,12 +182,25 @@ export default function ConversionSankey() {
             <div className="conversion-link-tooltip-value"><strong>{hoveredLink.link.count}</strong> 个关联对象</div>
             <div className="conversion-link-tooltip-share">占起点 {hoveredLink.link.from.count
               ? `${(hoveredLink.link.count / hoveredLink.link.from.count * 100).toFixed(1)}%` : "—"}</div>
-          </div>}</div></>}
-      <p className="conversion-note">{confirmedDeliveryBasis
-        ? "已招呼按岗位状态及更新时间统计；池外 HR 主动联系按「有交换」池外会话入库时间统计；已追问按「仅沟通」会话的追问次数与更新时间统计；已投递仅统计「有交换」会话中核实到“对方已同意，您的附件简历已发送给对方”的记录，日期按会话入库时间计算。旧会话需重新扫描「有交换」才能核实。流线按关联岗位或会话去重。"
-        : data.basis_version === 4
-        ? "这张图按旧口径把「有交换」当作投递线索，不代表已确认投递。重新扫描「有交换」后，点击「生成桑基图」使用附件简历发送确认口径。"
-        : "这张图按旧统计口径生成。点击「生成桑基图」后，将按当前岗位与会话状态重新统计。"}</p></>
+          </div>}</div>}
+      <div className="conversion-basis">
+        <button type="button" className="conversion-basis-toggle" aria-expanded={basisExpanded}
+          aria-controls="conversion-basis-content" onClick={() => setBasisExpanded(!basisExpanded)}>
+          {basisExpanded ? "收起统计口径" : "展开统计口径"}<span aria-hidden="true">{basisExpanded ? "⌃" : "⌄"}</span>
+        </button>
+        <div id="conversion-basis-content" className="conversion-note" hidden={!basisExpanded}>
+          {confirmedDeliveryBasis ? <>
+            <p>主动投递 · 池内：状态为“已招呼”且更新时间在所选日期内的岗位；不表示简历已发送。</p>
+            <p>HR 联系 · 池外：「有交换」中的池外会话，且入库时间在所选日期内。</p>
+            <p>已追问：「仅沟通」会话已追问，且更新时间在所选日期内。</p>
+            <p>简历投递成功：「有交换」会话中已核实“对方已同意，您的附件简历已发送给对方”，且入库时间在所选日期内。</p>
+            <p>简历投递失败：未核实到附件简历发送的其余关联对象；包含尚未投递或结果未确认，并非已确认发送失败数。</p>
+            <p>流线按关联岗位或会话去重；旧会话需重新扫描「有交换」才能核实附件简历发送。</p>
+          </> : <p>{data.basis_version === 4
+            ? "这张图按旧口径把「有交换」当作投递线索，不代表已确认投递。重新扫描「有交换」后，点击「生成桑基图」使用附件简历发送确认口径。"
+            : "这张图按旧统计口径生成。点击「生成桑基图」后，将按当前岗位与会话状态重新统计。"}</p>}
+        </div>
+      </div></>
         : <p className="conversion-message">{restoring ? "正在恢复上次生成的桑基图…" : "选择日期后，点击“生成桑基图”查看该时间段的转化情况。"}</p>}
     </div>
   </section>;

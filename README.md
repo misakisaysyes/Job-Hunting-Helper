@@ -50,7 +50,7 @@ AI 评分与自动生成招呼语可独立开启：关闭评分时为预筛通�
 API 使用 `config.py` 中的 `safety.state_db`；如采集时用了其他数据库路径，启动服务时传
 `--state-db 路径`，页面启动的采集也会写入同一路径。服务只监听本机 `127.0.0.1`。
 模型请求优先使用配置页保存并生效的 API Key；未配置时使用当前环境的 `DEEPSEEK_API_KEY`。
-Web 启动脚本在环境变量未设置、相邻 BossHunter 项目存在 `.config.credentials.yaml` 时，
+Web 启动脚本在本项目尚未保存 Key、环境变量未设置，且相邻 BossHunter 项目存在 `.config.credentials.yaml` 时，
 会从中读取现有 Key，不会将 Key 打印出来。启用 AI 评分或自动生成招呼语但仍无可用 Key 时，页面会提示且不会启动采集。
 
 Web 使用 `GET /api/jobs?limit=20&offset=0&query=...&status=...` 先筛选再分页读取，用
@@ -77,7 +77,7 @@ Web 使用 `GET /api/jobs?limit=20&offset=0&query=...&status=...` 先筛选再�
 `.state/user-config.json`，覆盖 `config.py` 中的默认值，下一轮 Web 任务立即生效，CLI 下次启动时也会读取。
 当前运行中的任务继续使用启动时的配置。完整配置页的“保存配置”先写入本地，点击“生效配置”后供下一轮任务使用。
 若修改了需要在启动时建立的配置（如 AI 并发数），生效操作会在采集、监测任务空闲时自动重启 API 服务；页面会等待服务恢复。
-API Key 可在完整配置页填写，单独保存在权限为 `0600` 的 `.state/ai-api-key`，读取配置的接口不会返回原文；也可继续使用环境变量。
+API Key 可在完整配置页填写，单独保存在项目根目录、权限为 `0600` 的 `.config.credentials.yaml`（与 BossHunter 相同的本地凭据文件形式）；旧版 `.state/ai-api-key` 会自动迁移。读取配置的接口不会返回原文；也可继续使用环境变量。
 监测页为「仅沟通」「有交换」和「新会话」分别提供启动按钮，通过 `POST /api/monitoring` 的 `phase` 字段分别提交 `communicated`、`exchanged` 或 `new_greetings`；三个扫描任务一次只能运行一个。「有交换」扫描从 BOSS「更多 → 有交换」读取列表和每条会话最近 100 条消息，不打开会话，也不自动将池外岗位加入岗位池。只有核实到 BOSS 消息“对方已同意，您的附件简历已发送给对方”，桑基图才把该会话计为已投递；未核实到的会话仍保留为有交换，入库日期口径不变。`GET /api/exchanged-conversations` 支持 `pool_status=inside|outside` 筛选；列表中的“查看会话”打开并核对 BOSS「有交换」中的目标会话，“删除”会在 BOSS 删除会话和聊天记录，经复核后将其移出本地当前列表。
 `GET /api/monitoring/current` 读取进度，`GET /api/conversations?limit=20&offset=0`
 读取去重后的会话列表；“查看会话”通过 `POST /api/conversations/{platform}/{conversation_id}/open`
