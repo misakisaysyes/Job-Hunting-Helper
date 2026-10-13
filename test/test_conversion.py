@@ -59,15 +59,19 @@ class ConversionTests(unittest.TestCase):
                     "platform": "boss", "conversation_id": conversation_id,
                     "company": "测试", "recruiter": "HR", "job_title": "岗位",
                     "source_job_id": job_id, "last_ts": 1, "in_job_pool": bool(job_id),
+                    "resume_delivery_message_id": f"resume-{conversation_id}"
+                        if conversation_id != "3" else "",
                 }, "scan-1")
 
         result = get_conversion_flow(self.path, self.today, self.today)
         self.assertEqual(result["metrics"], {"greeted": 1, "hr_initiated": 2,
-                                             "followups": 1, "deliveries": 3, "contacts": 3})
+                                             "followups": 1, "deliveries": 2, "contacts": 3})
         self.assertEqual(result["flows"], [
             {"source": "greeted", "followed_up": True, "delivered": True, "count": 1},
-            {"source": "hr_initiated", "followed_up": False, "delivered": True, "count": 2},
+            {"source": "hr_initiated", "followed_up": False, "delivered": False, "count": 1},
+            {"source": "hr_initiated", "followed_up": False, "delivered": True, "count": 1},
         ])
+        self.assertEqual(result["delivery_basis"], "confirmed_attachment_resume_exchange_first_seen")
         with closing(sqlite3.connect(self.path)) as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM followup_send_events").fetchone()[0], 1)
 
@@ -126,20 +130,22 @@ class ConversionTests(unittest.TestCase):
                     VALUES ('boss', ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (conversation_id, in_pool, active, judgment, first_seen,
                      updated, updated, count))
-            for conversation_id, active, first_seen in (
-                ("exchange-current", 1, self.now),
-                ("exchange-inactive", 0, self.now),
-                ("exchange-old", 1, outside),
+            for conversation_id, active, first_seen, confirmed in (
+                ("exchange-current", 1, self.now, False),
+                ("exchange-inactive", 0, self.now, True),
+                ("exchange-old", 1, outside, True),
             ):
                 conn.execute("""INSERT INTO monitored_exchanges
-                    (platform, conversation_id, first_seen_at, updated_at, scan_token, active)
-                    VALUES ('boss', ?, ?, ?, 'scan', ?)""",
-                    (conversation_id, first_seen, first_seen, active))
+                    (platform, conversation_id, first_seen_at, updated_at, scan_token, active,
+                     resume_delivery_message_id)
+                    VALUES ('boss', ?, ?, ?, 'scan', ?, ?)""",
+                    (conversation_id, first_seen, first_seen, active,
+                     f"resume-{conversation_id}" if confirmed else ""))
             conn.commit()
 
         result = get_conversion_flow(self.path, self.today, self.today)
         self.assertEqual(result["metrics"], {"greeted": 1, "hr_initiated": 2,
-                                             "followups": 2, "deliveries": 2, "contacts": 5})
+                                             "followups": 2, "deliveries": 1, "contacts": 5})
 
     def test_conversion_endpoint_returns_range_summary(self):
         handler_class = make_handler(self.path, MagicMock(), restart_event=Event(),

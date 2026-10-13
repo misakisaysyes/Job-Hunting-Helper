@@ -5,13 +5,29 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
-from patchright.sync_api import TimeoutError as BrowserTimeout
+from patchright.sync_api import Error as BrowserError, TimeoutError as BrowserTimeout
 
 from browser.browser import ChromeBrowser
 
 
 CHAT_URL = "https://www.zhipin.com/web/geek/chat"
 RESUME_DELIVERED = "对方已同意，您的附件简历已发送给对方"
+
+
+def _resume_delivery_evidence(messages: list[dict[str, Any]]) -> tuple[str, str]:
+    """Accept only BOSS's explicit attachment-resume delivery confirmation."""
+    for raw in reversed(messages):
+        message = _normalise_message(raw, "")
+        if (message["text"] == RESUME_DELIVERED and message["biz_type"] == "14"
+                and message["message_id"]):
+            try:
+                timestamp = int(message["sent_at"])
+                seconds = timestamp / 1000 if timestamp > 100_000_000_000 else timestamp
+                sent_at = datetime.fromtimestamp(seconds, timezone.utc).isoformat()
+            except (ValueError, OverflowError, OSError):
+                sent_at = ""
+            return message["message_id"], sent_at
+    return "", ""
 
 
 def _effective(message: dict[str, Any]) -> bool:
@@ -168,23 +184,39 @@ def scan_exchanged_conversations(cdp_url: str, *,
                                  active_days: int | None = None,
                                  on_progress: Callable[[str], None] | None = None
                                  ) -> list[dict[str, Any]]:
-    """Read the Exchange list without opening conversations or importing jobs."""
+    """Read Exchange rows and verify resume delivery from each chat's history."""
     browser = ChromeBrowser(cdp_url)
     try:
         tab = browser.new_tab("https://www.zhipin.com/robots.txt", background=True)
         if tab is None:
             raise RuntimeError("无法连接 BOSS 页面")
-        friends = _tab_friends(browser.page(tab), "有交换", active_days, on_progress)
+        page = browser.page(tab)
+        friends = _tab_friends(page, "有交换", active_days, on_progress)
         if on_progress:
             on_progress(f"已读取「有交换」列表 {len(friends)} 条会话")
-        return [{
-            "platform": "boss", "conversation_id": str(friend["uid"]),
-            "company": str(friend.get("brandName") or "").strip(),
-            "recruiter": str(friend.get("name") or "").strip(),
-            "job_title": str(friend.get("sourceTitle") or "").strip(),
-            "source_job_id": str(friend.get("encryptJobId") or ""),
-            "last_ts": int(friend.get("lastTS") or 0),
-        } for friend in friends]
+        results = []
+        for index, friend in enumerate(friends, start=1):
+            message_id = sent_at = ""
+            check_error = ""
+            try:
+                message_id, sent_at = _resume_delivery_evidence(_fetch_history(page, friend, 100))
+            except (BrowserError, KeyError, RuntimeError, TypeError, ValueError) as exc:
+                # A failed read never becomes a confirmed delivery; other rows remain usable.
+                check_error = str(exc)
+            results.append({
+                "platform": "boss", "conversation_id": str(friend["uid"]),
+                "company": str(friend.get("brandName") or "").strip(),
+                "recruiter": str(friend.get("name") or "").strip(),
+                "job_title": str(friend.get("sourceTitle") or "").strip(),
+                "source_job_id": str(friend.get("encryptJobId") or ""),
+                "last_ts": int(friend.get("lastTS") or 0),
+                "resume_delivery_message_id": message_id,
+                "resume_delivered_at": sent_at,
+                "resume_check_error": check_error,
+            })
+            if on_progress and (index == 1 or index % 10 == 0 or index == len(friends)):
+                on_progress(f"已核对「有交换」会话 {index}/{len(friends)} 条的附件简历发送记录")
+        return results
     finally:
         browser.close()
 

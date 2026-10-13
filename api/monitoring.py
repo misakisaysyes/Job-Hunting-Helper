@@ -41,6 +41,7 @@ def _initial_counts() -> dict[str, int]:
         "new_greetings_scanned", "filter_matches", "filter_pending", "filter_new",
         "filter_deleted", "filter_failed", "filter_stale",
         "exchanged_scanned", "exchanged_new", "exchanged_left_scope",
+        "exchanged_resume_confirmed", "exchanged_resume_unchecked",
     ), 0)
 
 
@@ -222,6 +223,10 @@ class MonitoringRun:
                             item["job_title"] = item["job_title"] or job.get("title") or ""
                             item["company"] = item["company"] or job.get("company") or ""
                         counts["exchanged_new"] += int(store.record_scan(item, scan_token))
+                        saved_exchange = store.get_conversation(item["platform"], item["conversation_id"])
+                        counts["exchanged_resume_confirmed"] += int(bool(
+                            saved_exchange and saved_exchange["resume_delivery_message_id"]))
+                        counts["exchanged_resume_unchecked"] += int(bool(item.get("resume_check_error")))
                         self._phase_progress("exchanged", "processing",
                                              f"正在处理有交换会话 {index}/{len(exchanges)}", counts)
                     counts["exchanged_left_scope"] = store.deactivate_unseen(scan_token)

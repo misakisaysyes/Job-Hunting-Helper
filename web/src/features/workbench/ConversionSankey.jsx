@@ -38,8 +38,8 @@ function linkPath(link) {
   return `M ${x1} ${link.y1} C ${mid} ${link.y1}, ${mid} ${link.y2}, ${x2} ${link.y2}`;
 }
 
-function linkLabel(link) {
-  return `${LABELS[link.from.key]} → ${LABELS[link.to.key]}`;
+function linkLabel(link, labels) {
+  return `${labels[link.from.key]} → ${labels[link.to.key]}`;
 }
 
 export default function ConversionSankey() {
@@ -69,6 +69,10 @@ export default function ConversionSankey() {
   }, []);
 
   const layout = useMemo(() => buildConversionLayout(data?.flows || []), [data]);
+  const confirmedDeliveryBasis = data?.basis_version === 5;
+  const labels = confirmedDeliveryBasis ? {
+    ...LABELS, "delivery:true": "附件简历已发送", "delivery:false": "未确认附件简历发送",
+  } : LABELS;
   const greetedContacts = (data?.flows || []).filter((flow) => flow.source === "greeted")
     .reduce((sum, flow) => sum + flow.count, 0);
   const greetedDelivered = (data?.flows || []).filter((flow) => flow.source === "greeted" && flow.delivered)
@@ -113,7 +117,7 @@ export default function ConversionSankey() {
     <div className="workbench-history-heading">
       <div className="workbench-section-heading">
         <h2 id="conversion-title">招呼到简历投递</h2>
-        <p>按上海时间统计所选日期内的岗位与会话状态，查看招呼到「有交换」的转化路径。</p>
+        <p>按上海时间统计所选日期内的岗位与会话状态，查看招呼到附件简历发送的转化路径。</p>
       </div>
       <div className="workbench-history-controls conversion-date-controls">
         <label>开始日期<input type="date" value={start} max={end || today} disabled={restoring}
@@ -139,17 +143,20 @@ export default function ConversionSankey() {
         <div><span>已招呼 · 池内</span><strong>{data?.metrics?.greeted ?? "—"}</strong></div>
         <div><span>HR 主动联系 · 池外</span><strong>{data?.metrics?.hr_initiated ?? "—"}</strong></div>
         <div><span>已追问</span><strong>{data?.metrics?.followups ?? "—"}</strong></div>
-        <div><span>有交换（投递线索）</span><strong>{data?.metrics?.deliveries ?? "—"}</strong></div>
-        <div className="conversion-rate"><span>已招呼转有交换</span><strong>{greetedContacts ? `${conversion}%` : "—"}</strong></div>
+        <div><span>{confirmedDeliveryBasis ? "已投递 · 附件简历已发送" : "有交换（投递线索）"}</span>
+          <strong>{data?.metrics?.deliveries ?? "—"}</strong></div>
+        <div className="conversion-rate"><span>{confirmedDeliveryBasis ? "已招呼转投递" : "已招呼转有交换"}</span>
+          <strong>{greetedContacts ? `${conversion}%` : "—"}</strong></div>
       </div>
       {layout.total === 0 ? <div className="conversion-message">该统计时间段内暂无招呼、追问或有交换记录。</div>
-          : <><p className="conversion-route-summary">池外未经追问直接到有交换：<strong>{directOutsideExchange}</strong> 条</p>
+          : <><p className="conversion-route-summary">池外未经追问直接{confirmedDeliveryBasis ? "投递" : "到有交换"}：
+            <strong>{directOutsideExchange}</strong> 条</p>
             <div className="conversion-chart-frame" ref={chartFrameRef}>
             <div className="conversion-chart-scroll"><svg className="conversion-chart" viewBox="0 0 1000 370"
-            role="img" aria-label={`${data.start_date} 至 ${data.end_date} 的转化桑基图，共 ${layout.total} 个关联对象，已招呼 ${data.metrics.greeted} 个岗位，已追问 ${data.metrics.followups} 条会话，有交换 ${data.metrics.deliveries} 条会话`}>
+            role="img" aria-label={`${data.start_date} 至 ${data.end_date} 的转化桑基图，共 ${layout.total} 个关联对象，已招呼 ${data.metrics.greeted} 个岗位，已追问 ${data.metrics.followups} 条会话，${confirmedDeliveryBasis ? "附件简历已发送" : "有交换"} ${data.metrics.deliveries} 条会话`}>
             <text className="conversion-column-title" x="142" y="25">来源</text>
             <text className="conversion-column-title" x="500" y="25">追问</text>
-            <text className="conversion-column-title" x="856" y="25">有交换</text>
+            <text className="conversion-column-title" x="856" y="25">{confirmedDeliveryBasis ? "已投递" : "有交换"}</text>
             {layout.links.map((link) => <path key={link.key} d={linkPath(link)} fill="none"
               stroke={link.stage === 2 ? COLORS[`delivery:${link.delivered}`] : COLORS[`source:${link.source}`]}
               strokeOpacity={hoveredLink?.link.key === link.key ? 0.82
@@ -158,29 +165,31 @@ export default function ConversionSankey() {
             {[...layout.links].sort((a, b) => b.width - a.width).map((link) => <path
               key={`hit:${link.key}`} d={linkPath(link)} fill="none" stroke="transparent"
               strokeWidth={Math.max(link.width, 12)} pointerEvents="stroke"
-              aria-label={`${linkLabel(link)}${link.stage === 3 ? "，未追问直接到达" : ""}，${link.count} 个关联对象`}
+              aria-label={`${linkLabel(link, labels)}${link.stage === 3 ? "，未追问直接到达" : ""}，${link.count} 个关联对象`}
               onPointerEnter={(event) => showLinkTooltip(event, link)}
               onPointerMove={(event) => showLinkTooltip(event, link)}
               onPointerLeave={() => setHoveredLink(null)} />)}
             {layout.nodes.map((node) => <g key={node.key}>
               <rect x={node.x} y={node.y} width="16" height={node.height} rx="4" fill={COLORS[node.key]} />
-              <title>{`${LABELS[node.key]}：${node.count}`}</title>
+              <title>{`${labels[node.key]}：${node.count}`}</title>
               <text className="conversion-node-label" x={node.column === 0 ? node.x - 10 : node.x + 26}
                 y={node.y + node.height / 2} dominantBaseline="middle"
-                textAnchor={node.column === 0 ? "end" : "start"}>{LABELS[node.key]} {node.count}</text>
+                textAnchor={node.column === 0 ? "end" : "start"}>{labels[node.key]} {node.count}</text>
             </g>)}
           </svg></div>
           {hoveredLink && <div className="conversion-link-tooltip" role="tooltip"
             style={{ left: hoveredLink.x, top: hoveredLink.y,
               transform: hoveredLink.y < 100 ? "translate(-50%, 14px)" : "translate(-50%, calc(-100% - 14px))" }}>
-            <div className="conversion-link-tooltip-route">{linkLabel(hoveredLink.link)}</div>
+            <div className="conversion-link-tooltip-route">{linkLabel(hoveredLink.link, labels)}</div>
             {hoveredLink.link.stage === 3 && <div className="conversion-link-tooltip-kind">未追问，直接到达</div>}
             <div className="conversion-link-tooltip-value"><strong>{hoveredLink.link.count}</strong> 个关联对象</div>
             <div className="conversion-link-tooltip-share">占起点 {hoveredLink.link.from.count
               ? `${(hoveredLink.link.count / hoveredLink.link.from.count * 100).toFixed(1)}%` : "—"}</div>
           </div>}</div></>}
-      <p className="conversion-note">{data.basis_version === 4
-        ? "已招呼按岗位状态及更新时间统计；池外 HR 主动联系按「有交换」池外会话入库时间统计；已追问按「仅沟通」会话的追问次数与更新时间统计；有交换按「有交换」会话入库时间统计。流线按关联岗位或会话去重。「有交换」是投递线索，不等于已确认投递。"
+      <p className="conversion-note">{confirmedDeliveryBasis
+        ? "已招呼按岗位状态及更新时间统计；池外 HR 主动联系按「有交换」池外会话入库时间统计；已追问按「仅沟通」会话的追问次数与更新时间统计；已投递仅统计「有交换」会话中核实到“对方已同意，您的附件简历已发送给对方”的记录，日期按会话入库时间计算。旧会话需重新扫描「有交换」才能核实。流线按关联岗位或会话去重。"
+        : data.basis_version === 4
+        ? "这张图按旧口径把「有交换」当作投递线索，不代表已确认投递。重新扫描「有交换」后，点击「生成桑基图」使用附件简历发送确认口径。"
         : "这张图按旧统计口径生成。点击「生成桑基图」后，将按当前岗位与会话状态重新统计。"}</p></>
         : <p className="conversion-message">{restoring ? "正在恢复上次生成的桑基图…" : "选择日期后，点击“生成桑基图”查看该时间段的转化情况。"}</p>}
     </div>

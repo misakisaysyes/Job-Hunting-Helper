@@ -51,7 +51,9 @@ def get_conversion_flow(db_path: Path, start_date: str, end_date: str) -> dict:
               AND updated_at >= ? AND updated_at < ?""",
             (lower, upper)).fetchall()
         exchanged = conn.execute("""SELECT platform, conversation_id, source_job_id
-            FROM monitored_exchanges WHERE first_seen_at >= ? AND first_seen_at < ?""",
+            FROM monitored_exchanges
+            WHERE resume_delivery_message_id != ''
+              AND first_seen_at >= ? AND first_seen_at < ?""",
             (lower, upper)).fetchall()
 
     contacts: dict[tuple[str, str, str], dict] = {}
@@ -88,8 +90,8 @@ def get_conversion_flow(db_path: Path, start_date: str, end_date: str) -> dict:
         "flows": [{"source": source, "followed_up": followed_up,
                    "delivered": delivered, "count": count}
                   for (source, followed_up, delivered), count in sorted(flows.items())],
-        "basis_version": 4,
-        "delivery_basis": "exchanged_first_seen",
+        "basis_version": 5,
+        "delivery_basis": "confirmed_attachment_resume_exchange_first_seen",
     }
 
 

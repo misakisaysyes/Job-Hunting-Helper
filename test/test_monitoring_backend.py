@@ -8,7 +8,9 @@ from unittest.mock import MagicMock, patch
 from contextlib import closing
 from threading import Event
 
-from browser.boss_monitor import CHAT_URL, _tab_friends, scan_exchanged_conversations, scan_new_greetings, scan_recent_conversations
+from browser.boss_monitor import (CHAT_URL, RESUME_DELIVERED, _resume_delivery_evidence,
+                                  _tab_friends, scan_exchanged_conversations,
+                                  scan_new_greetings, scan_recent_conversations)
 from browser.browser import ChromeBrowser
 from browser.boss_filter import FilterDeleteResult
 from api.conversations import (delete_conversation_record, delete_exchanged_conversation,
@@ -190,18 +192,43 @@ class MonitoringBackendTests(unittest.TestCase):
         self.assertEqual(clicks, ["更多", "有交换"])
         page.get_by_text.assert_called_once_with("有交换", exact=True)
 
-    def test_exchange_scan_reads_list_without_chat_history(self) -> None:
+    def test_exchange_scan_confirms_attachment_resume_from_history(self) -> None:
         friend = {"uid": "123", "brandName": "甲公司", "name": "张先生",
                   "sourceTitle": "前端工程师", "encryptJobId": "job-a", "lastTS": 1234567890}
+        confirmation = {"mid": 88, "bizType": 14, "body": {"text": RESUME_DELIVERED},
+                        "time": 1791454452678}
         with patch("browser.boss_monitor.ChromeBrowser") as browser, \
                 patch("browser.boss_monitor._tab_friends", return_value=[friend]) as list_friends, \
-                patch("browser.boss_monitor._fetch_history", side_effect=AssertionError("不应读取聊天记录")):
+                patch("browser.boss_monitor._fetch_history", return_value=[confirmation]) as history:
             browser.return_value.new_tab.return_value = "tab"
             rows = scan_exchanged_conversations("cdp", active_days=3)
         list_friends.assert_called_once_with(browser.return_value.page.return_value,
                                              "有交换", 3, None)
+        history.assert_called_once_with(browser.return_value.page.return_value, friend, 100)
         self.assertEqual(rows[0]["source_job_id"], "job-a")
         self.assertEqual(rows[0]["conversation_id"], "123")
+        self.assertEqual(rows[0]["resume_delivery_message_id"], "88")
+        self.assertEqual(rows[0]["resume_delivered_at"],
+                         datetime.fromtimestamp(1791454452.678, timezone.utc).isoformat())
+
+    def test_resume_delivery_requires_exact_boss_confirmation_card(self) -> None:
+        card = {"mid": 88, "bizType": 14, "body": {"text": RESUME_DELIVERED},
+                "time": 1791454452678}
+        self.assertEqual(_resume_delivery_evidence([card]), ("88",
+            datetime.fromtimestamp(1791454452.678, timezone.utc).isoformat()))
+        for change in ({"bizType": 1}, {"body": {"text": "我已发送简历"}}, {"mid": ""}):
+            with self.subTest(change=change):
+                self.assertEqual(_resume_delivery_evidence([{**card, **change}]), ("", ""))
+
+    def test_exchange_history_error_does_not_claim_resume_delivery(self) -> None:
+        friend = {"uid": "123", "brandName": "甲公司", "lastTS": 1234567890}
+        with patch("browser.boss_monitor.ChromeBrowser") as browser, \
+                patch("browser.boss_monitor._tab_friends", return_value=[friend]), \
+                patch("browser.boss_monitor._fetch_history", side_effect=RuntimeError("读取失败")):
+            browser.return_value.new_tab.return_value = "tab"
+            rows = scan_exchanged_conversations("cdp")
+        self.assertEqual(rows[0]["resume_delivery_message_id"], "")
+        self.assertEqual(rows[0]["resume_check_error"], "读取失败")
 
     def test_new_greeting_scan_passes_its_own_activity_window(self) -> None:
         friend = {"uid": "123", "avatar": "https://example.invalid/a.png",
@@ -359,7 +386,8 @@ class MonitoringBackendTests(unittest.TestCase):
             path = Path(directory) / "state.sqlite"
             item = {"platform": "boss", "conversation_id": "123", "company": "甲公司",
                     "recruiter": "张先生", "job_title": "前端", "source_job_id": "outside-job",
-                    "last_ts": 1234567890}
+                    "last_ts": 1234567890, "resume_delivery_message_id": "88",
+                    "resume_delivered_at": "1791454452678"}
             with patch("api.monitoring.scan_recent_conversations", side_effect=AssertionError("不应扫描仅沟通")), \
                     patch("api.monitoring.scan_new_greetings", side_effect=AssertionError("不应扫描新招呼")), \
                     patch("api.monitoring.scan_exchanged_conversations", return_value=[item]) as scan:
@@ -371,9 +399,11 @@ class MonitoringBackendTests(unittest.TestCase):
             self.assertEqual(run.snapshot()["phases"]["communicated"]["status"], "not_run")
             self.assertEqual(run.snapshot()["phases"]["new_greetings"]["status"], "not_run")
             self.assertEqual(run.counts["exchanged_scanned"], 1)
+            self.assertEqual(run.counts["exchanged_resume_confirmed"], 1)
             with closing(sqlite3.connect(path)) as conn:
                 rows, total = ExchangeStore(conn).list_conversations(limit=20, offset=0)
                 self.assertEqual((total, rows[0]["in_job_pool"]), (1, 0))
+                self.assertEqual(rows[0]["resume_delivery_message_id"], "88")
                 self.assertIsNone(JobStore(conn).get_job("boss", "outside-job"))
                 self.assertEqual(ConversationStore(conn).list_conversations(limit=20, offset=0)[1], 0)
 
@@ -382,13 +412,32 @@ class MonitoringBackendTests(unittest.TestCase):
         item = {"platform": "boss", "conversation_id": "123", "company": "甲公司",
                 "recruiter": "张先生", "job_title": "前端", "source_job_id": "job-a",
                 "last_ts": 1234567890, "in_job_pool": False}
-        self.assertTrue(store.record_scan(item, "first"))
+        self.assertTrue(store.record_scan({**item, "resume_delivery_message_id": "88",
+                                           "resume_delivered_at": "1791454452678"}, "first"))
         first = store.list_conversations(limit=20, offset=0)[0][0]["first_seen_at"]
         self.assertFalse(store.record_scan({**item, "company": "乙公司"}, "second"))
         rows, total = store.list_conversations(limit=20, offset=0, query="乙公司")
         self.assertEqual((total, rows[0]["first_seen_at"]), (1, first))
+        self.assertEqual(rows[0]["resume_delivery_message_id"], "88")
         self.assertEqual(store.deactivate_unseen("third"), 1)
         self.assertEqual(store.list_conversations(limit=20, offset=0)[1], 0)
+
+    def test_exchange_store_migrates_existing_rows_without_claiming_delivery(self) -> None:
+        with closing(sqlite3.connect(":memory:")) as conn:
+            conn.execute("""CREATE TABLE monitored_exchanges (
+                platform TEXT NOT NULL, conversation_id TEXT NOT NULL,
+                company TEXT NOT NULL DEFAULT '', recruiter TEXT NOT NULL DEFAULT '',
+                job_title TEXT NOT NULL DEFAULT '', source_job_id TEXT NOT NULL DEFAULT '',
+                last_ts INTEGER NOT NULL DEFAULT 0, in_job_pool INTEGER NOT NULL DEFAULT 0,
+                first_seen_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                scan_token TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+                PRIMARY KEY (platform, conversation_id))""")
+            conn.execute("""INSERT INTO monitored_exchanges
+                (platform, conversation_id, first_seen_at, updated_at, scan_token)
+                VALUES ('boss', 'old', '2026-10-01', '2026-10-01', 'scan')""")
+            row = ExchangeStore(conn).get_conversation("boss", "old")
+            self.assertEqual(row["resume_delivery_message_id"], "")
+            self.assertEqual(row["resume_delivered_at"], "")
 
     def test_exchange_pool_filter_and_verified_boss_delete_keep_local_history(self) -> None:
         with TemporaryDirectory() as directory:
