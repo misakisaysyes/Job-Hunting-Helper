@@ -32,6 +32,8 @@ class PrefilterTestFailure(RuntimeError):
 def validate_run_config(config: dict[str, Any]) -> dict[str, Any]:
     """Validate collection and AI settings regardless of the caller."""
     collection, profile = config["collection"], config["profile"]
+    if type(config["browser"].get("silent_background")) is not bool:
+        raise ValueError("browser.silent_background 必须是布尔值")
     if collection["platform"] != "boss":
         raise ValueError(f"当前不支持采集平台：{collection['platform']}")
     for section, defaults in DEFAULT_CONFIG.items():
@@ -162,7 +164,8 @@ def run_collection(
             job_store.save(record)
             on_record(record)
 
-        browser = ChromeBrowser(config["browser"]["cdp_url"])
+        browser = ChromeBrowser(config["browser"]["cdp_url"],
+                                silent_background=config["browser"].get("silent_background", False))
         try:
             max_jobs = config["collection"]["max_jobs"]
             target_jobs = config["collection"]["target_jobs"]

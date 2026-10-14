@@ -175,7 +175,9 @@ class JobWorkflowTests(unittest.TestCase):
 
     def test_sender_clicks_once_and_requires_matching_own_message(self) -> None:
         job = {"source_job_id": "wanted", "url": "https://www.zhipin.com/job_detail/wanted.html"}
-        with patch("browser.boss_message.ChromeBrowser") as browser_type, patch("browser.boss_message.time.sleep"):
+        with patch("browser.boss_message.ChromeBrowser") as browser_type, \
+                patch("browser.boss_message._chat_matches_job", return_value=True), \
+                patch("browser.boss_message.time.sleep"):
             browser = browser_type.return_value
             browser.new_tab.return_value = "tab"
             page = browser.page.return_value
@@ -193,14 +195,15 @@ class JobWorkflowTests(unittest.TestCase):
             send_button.count.return_value = 1
             send_button.first.is_enabled.return_value = True
             page.locator.side_effect = [chat_button, input_box, send_button]
-            def navigate(url, **_): page.url = url
-            page.goto.side_effect = navigate
-            page.evaluate.side_effect = [False, "missing", "delivered", "delivered"]
+            chat_button.nth.return_value.click.side_effect = lambda **_: setattr(
+                page, "url", "https://www.zhipin.com/web/geek/chat?jobId=wanted")
+            page.evaluate.side_effect = [False, False, "missing", "delivered", "delivered"]
             browser.close.side_effect = RuntimeError("关闭浏览器连接时出错")
             result = send_boss_greeting(job, "你好", "http://127.0.0.1:9222")
             self.assertTrue(result.verified)
             self.assertEqual(result.chat_url, "https://www.zhipin.com/web/geek/chat?jobId=wanted")
             chat_button.nth.return_value.click.assert_called_once()
+            page.goto.assert_not_called()
             input_box.first.wait_for.assert_called_once_with(state="visible", timeout=8000)
             send_button.first.wait_for.assert_called_once_with(state="visible", timeout=8000)
             send_button.first.click.assert_called_once()

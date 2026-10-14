@@ -43,12 +43,12 @@ export default function JobList({ jobs, total, statusCounts, page, pageSize, loa
             : query || statusFilter ? "调整关键词或岗位状态后重试。" : "采集并通过预筛的岗位会显示在这里。"}</span></div>
       ) : (
         <div className="table-scroll">
-          <table className={batch.batchMode ? "batch-table" : ""}>
+          <table className={`job-list-table${batch.batchMode ? " batch-table" : ""}`}>
             <thead><tr>
               {batch.batchMode && <th className="select-cell"><input type="checkbox" aria-label="全选本页岗位"
                 checked={batch.allSelected} disabled={loading || Boolean(batch.busy) || !visibleJobs.length}
                 onChange={(event) => batch.selectAll(event.target.checked)} /></th>}
-              <th>岗位 / 公司</th><th>薪资与要求</th><th>岗位评分</th><th>岗位状态</th><th>变更时间</th><th className="actions-head">操作</th>
+              <th>岗位 / 公司</th><th>岗位来源</th><th>薪资与要求</th><th>岗位评分</th><th>岗位状态</th><th>变更时间</th><th className="actions-head">操作</th>
             </tr></thead>
             <tbody>{visibleJobs.map((job) => {
               const key = jobKey(job);
@@ -66,6 +66,7 @@ export default function JobList({ jobs, total, statusCounts, page, pageSize, loa
                     {sendIssue && <div className={`job-send-issue ${sendIssue.className}`}>
                       {sendIssue.label}：{sendIssue.reason}
                     </div>}</td>
+                  <td className="job-source-cell">{job.source_label || "来源未记录"}</td>
                   <td><div className="salary">{job.salary || "薪资未标注"}</div><div className="requirement">{[job.experience, job.education].filter(Boolean).join(" · ") || "要求未标注"}</div></td>
                   <td><span className={score.className}>{score.text}</span>
                     {score.note && <div className="score-source">{score.note}</div>}</td>
@@ -75,7 +76,7 @@ export default function JobList({ jobs, total, statusCounts, page, pageSize, loa
                   <td className="actions"><button className="text-button" onClick={() => onExpanded(expanded === key ? "" : key)} aria-expanded={expanded === key}>{expanded === key ? "收起" : "详情"}</button>
                     <button className="delete-button" onClick={() => onRemove(job)} disabled={deleting === key || Boolean(batch.busy)}>{deleting === key ? "删除中" : "删除"}</button></td>
                 </tr>
-                {expanded === key && <tr className="details-row"><td colSpan={batch.batchMode ? 7 : 6}><JobDetails job={job} scoreThreshold={scoreThreshold}
+                {expanded === key && <tr className="details-row"><td colSpan={batch.batchMode ? 8 : 7}><JobDetails job={job} scoreThreshold={scoreThreshold}
                   onJobChange={(updated) => { batch.syncSelection(updated); onJobChange(updated); }} /></td></tr>}
               </React.Fragment>;
             })}</tbody>

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 from contextlib import closing
 from threading import Event
 
-from browser.boss_monitor import (CHAT_URL, RESUME_DELIVERED, _resume_delivery_evidence,
+from browser.boss_monitor import (CHAT_URL, RESUME_DELIVERED, RESUME_VIEWED, _resume_delivery_evidence,
                                   _tab_friends, scan_exchanged_conversations,
                                   scan_new_greetings, scan_recent_conversations)
 from browser.browser import ChromeBrowser
@@ -23,13 +23,17 @@ from data.conversation_store import ConversationStore
 from data.exchange_store import ExchangeStore
 from data.filter_store import FilterStore
 from data.job_store import JobStore
-from config import MONITORING_CONFIG
+from data.task_run_store import TaskRunStore
+from config import DEFAULT_CONFIG, MONITORING_CONFIG
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 
 class MonitoringBackendTests(unittest.TestCase):
     def setUp(self) -> None:
+        browser_config = patch.dict(DEFAULT_CONFIG["browser"], {"silent_background": False})
+        browser_config.start()
+        self.addCleanup(browser_config.stop)
         self.conn = sqlite3.connect(":memory:")
         self.addCleanup(self.conn.close)
         self.store = ConversationStore(self.conn)
@@ -219,6 +223,19 @@ class MonitoringBackendTests(unittest.TestCase):
         for change in ({"bizType": 1}, {"body": {"text": "我已发送简历"}}, {"mid": ""}):
             with self.subTest(change=change):
                 self.assertEqual(_resume_delivery_evidence([{**card, **change}]), ("", ""))
+
+    def test_resume_viewed_receipt_confirms_delivery_when_send_card_is_absent(self) -> None:
+        viewed = {"mid": 99, "bizType": 21050035, "body": {"text": RESUME_VIEWED},
+                  "time": 1791972575248}
+        self.assertEqual(_resume_delivery_evidence([viewed]), ("99",
+            datetime.fromtimestamp(1791972575.248, timezone.utc).isoformat()))
+        for change in ({"bizType": 1}, {"body": {"text": "我已查看了您的附件简历"}},
+                       {"mid": ""}):
+            with self.subTest(change=change):
+                self.assertEqual(_resume_delivery_evidence([{**viewed, **change}]), ("", ""))
+        sent = {"mid": 88, "bizType": 14, "body": {"text": RESUME_DELIVERED},
+                "time": 1791972528175}
+        self.assertEqual(_resume_delivery_evidence([sent, viewed])[0], "88")
 
     def test_exchange_history_error_does_not_claim_resume_delivery(self) -> None:
         friend = {"uid": "123", "brandName": "甲公司", "lastTS": 1234567890}
@@ -413,7 +430,97 @@ class MonitoringBackendTests(unittest.TestCase):
             self.assertEqual(state["counts"]["phase"], "new_greetings")
             self.assertEqual(state["phases"]["communicated"]["status"], "not_run")
             self.assertEqual(state["phases"]["new_greetings"]["status"], "pending")
-            self.assertEqual(thread.call_args.kwargs["args"][-1], "new_greetings")
+            self.assertEqual(thread.call_args.kwargs["args"][-2], "new_greetings")
+
+    def test_phase_results_survive_other_scans_and_api_restart(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite"
+            run = MonitoringRun(path)
+            with patch("api.monitoring.Thread"):
+                greeting_run = run.start("new_greetings")
+            with patch("api.monitoring.scan_new_greetings", return_value=[
+                    {"platform": "boss", "conversation_id": "new", "company": "普通公司"}]):
+                run._execute(run_id=greeting_run["run_id"], phase="new_greetings",
+                             blocked_terms=[], browser_config={"cdp_url": "cdp", "silent_background": False})
+            first = run.snapshot()["phase_runs"]["new_greetings"]
+            self.assertEqual((first["status"], first["counts"]["new_greetings_scanned"]),
+                             ("completed", 1))
+            self.assertIsNotNone(first["started_at"])
+            self.assertIsNotNone(first["finished_at"])
+
+            with patch("api.monitoring.Thread"):
+                communicated_run = run.start("communicated")
+            during = run.snapshot()["phase_runs"]
+            self.assertEqual(during["new_greetings"]["counts"]["new_greetings_scanned"], 1)
+            self.assertEqual(during["new_greetings"]["run_id"], greeting_run["run_id"])
+            self.assertEqual(during["communicated"]["run_id"], communicated_run["run_id"])
+            self.assertIsNotNone(during["communicated"]["started_at"])
+            with patch("api.monitoring.scan_recent_conversations", return_value=[]):
+                run._execute(run_id=communicated_run["run_id"], phase="communicated",
+                             browser_config={"cdp_url": "cdp", "silent_background": False})
+
+            with patch("api.monitoring.Thread"):
+                exchanged_run = run.start("exchanged")
+            with patch("api.monitoring.scan_exchanged_conversations", return_value=[]):
+                run._execute(run_id=exchanged_run["run_id"], phase="exchanged",
+                             browser_config={"cdp_url": "cdp", "silent_background": False})
+
+            restored = MonitoringRun(path).snapshot()["phase_runs"]
+            self.assertEqual(restored["new_greetings"]["counts"]["new_greetings_scanned"], 1)
+            self.assertEqual(restored["communicated"]["status"], "completed")
+            self.assertIsNotNone(restored["communicated"]["finished_at"])
+            self.assertEqual(restored["exchanged"]["status"], "completed")
+            self.assertIsNotNone(restored["exchanged"]["started_at"])
+            self.assertIsNotNone(restored["exchanged"]["finished_at"])
+
+            with patch("api.monitoring.Thread"):
+                rerun = run.start("new_greetings")
+            current = run.snapshot()["phase_runs"]["new_greetings"]
+            self.assertEqual(current["run_id"], rerun["run_id"])
+            self.assertEqual(current["last_completed"]["run_id"], greeting_run["run_id"])
+            self.assertEqual(current["last_completed"]["counts"]["new_greetings_scanned"], 1)
+            run.run_store.mark_interrupted()
+            interrupted = MonitoringRun(path).snapshot()["phase_runs"]["new_greetings"]
+            self.assertEqual(interrupted["status"], "interrupted")
+            self.assertIsNotNone(interrupted["finished_at"])
+            self.assertEqual(interrupted["last_completed"]["counts"]["new_greetings_scanned"], 1)
+
+    def test_today_phase_stats_are_independent_and_only_total_completed_scans(self) -> None:
+        with TemporaryDirectory() as directory:
+            store = TaskRunStore(Path(directory) / "state.sqlite")
+
+            def completed(scope, counts, started):
+                run_id = store.start("monitoring", started, "扫描中", counts={"phase": scope})
+                store.finish(run_id, "completed", "已完成", counts,
+                             started.replace("02:00:00", "02:01:00"))
+                return run_id
+
+            completed("communicated", {"phase": "communicated", "scanned": 99},
+                      "2026-10-13T02:00:00+00:00")
+            completed("communicated", {"phase": "communicated", "scanned": 4},
+                      "2026-10-14T02:00:00+00:00")
+            exchanged = completed("exchanged", {"phase": "exchanged", "exchanged_scanned": 3},
+                                  "2026-10-14T02:00:00+00:00")
+            completed("communicated", {"phase": "communicated", "scanned": 5},
+                      "2026-10-14T02:00:00+00:00")
+            both = completed("all", {"scanned": 7, "new_greetings_scanned": 8,
+                                      "phase_states": {
+                                          "communicated": {"status": "completed"},
+                                          "new_greetings": {"status": "completed"},
+                                          "exchanged": {"status": "not_run"}}},
+                             "2026-10-14T02:00:00+00:00")
+            pending = store.start("monitoring", "2026-10-14T03:00:00+00:00", "扫描中",
+                                  counts={"phase": "new_greetings", "new_greetings_scanned": 6,
+                                          "phase_states": {"new_greetings": {"status": "pending"}}})
+
+            stats = store.today_monitoring_phases(
+                now=datetime(2026, 10, 14, 12, tzinfo=timezone.utc))
+            self.assertEqual(stats["communicated"],
+                             {"runs": 3, "scanned_total": 16, "latest_run_id": both})
+            self.assertEqual(stats["exchanged"],
+                             {"runs": 1, "scanned_total": 3, "latest_run_id": exchanged})
+            self.assertEqual(stats["new_greetings"],
+                             {"runs": 2, "scanned_total": 8, "latest_run_id": pending})
 
     def test_exchanged_scan_is_independent_and_keeps_outside_job_outside(self) -> None:
         with TemporaryDirectory() as directory:
@@ -456,6 +563,25 @@ class MonitoringBackendTests(unittest.TestCase):
         self.assertEqual(store.deactivate_unseen("third"), 1)
         self.assertEqual(store.list_conversations(limit=20, offset=0)[1], 0)
 
+    def test_exchange_update_time_tracks_latest_scan(self) -> None:
+        store = ExchangeStore(self.conn)
+        item = {"platform": "boss", "conversation_id": "123", "company": "甲公司",
+                "recruiter": "张先生", "job_title": "前端", "source_job_id": "job-a",
+                "last_ts": 1234567890, "in_job_pool": False}
+        with patch("data.exchange_store._now", return_value="2026-10-14T10:00:00+00:00"):
+            store.record_scan(item, "first")
+        with patch("data.exchange_store._now", return_value="2026-10-14T11:00:00+00:00"):
+            store.mark_removed("boss", "123")
+        stored = self.conn.execute("""SELECT updated_at, last_scanned_at
+            FROM monitored_exchanges WHERE conversation_id = '123'""").fetchone()
+        self.assertEqual(stored, ("2026-10-14T11:00:00+00:00",
+                                  "2026-10-14T10:00:00+00:00"))
+        with patch("data.exchange_store._now", return_value="2026-10-14T12:00:00+00:00"):
+            store.record_scan(item, "second")
+        row = store.list_conversations(limit=20, offset=0)[0][0]
+        self.assertEqual(row["first_seen_at"], "2026-10-14T10:00:00+00:00")
+        self.assertEqual(row["last_scanned_at"], "2026-10-14T12:00:00+00:00")
+
     def test_exchange_store_migrates_existing_rows_without_claiming_delivery(self) -> None:
         with closing(sqlite3.connect(":memory:")) as conn:
             conn.execute("""CREATE TABLE monitored_exchanges (
@@ -472,6 +598,7 @@ class MonitoringBackendTests(unittest.TestCase):
             row = ExchangeStore(conn).get_conversation("boss", "old")
             self.assertEqual(row["resume_delivery_message_id"], "")
             self.assertEqual(row["resume_delivered_at"], "")
+            self.assertEqual(row["last_scanned_at"], "2026-10-01")
 
     def test_exchange_pool_filter_and_verified_boss_delete_keep_local_history(self) -> None:
         with TemporaryDirectory() as directory:
@@ -644,10 +771,15 @@ class MonitoringBackendTests(unittest.TestCase):
             run_id = run.run_store.start("monitoring", "2026-10-10T00:01:00+00:00", "扫描中")
             with patch("api.monitoring.scan_recent_conversations", return_value=[{}] * 3), \
                     patch("api.monitoring.scan_new_greetings", side_effect=RuntimeError("列表读取失败")):
-                run._execute(run_id=run_id)
+                run._execute(run_id=run_id,
+                             browser_config={"cdp_url": "cdp", "silent_background": False})
             state = run.run_store.get_run(run_id)
             self.assertEqual(state["status"], "failed")
             self.assertEqual((state["counts"]["scanned"], state["counts"]["communicated_new"]), (3, 0))
+            phases = MonitoringRun(run.db_path).snapshot()["phase_runs"]
+            self.assertEqual(phases["communicated"]["status"], "skipped")
+            self.assertEqual(phases["new_greetings"]["status"], "failed")
+            self.assertIsNotNone(phases["communicated"]["finished_at"])
 
     def test_monitoring_marks_the_failed_scan_stage(self) -> None:
         with TemporaryDirectory() as directory:

@@ -21,8 +21,9 @@ def api_job(job_id: str) -> dict:
 
 
 class FakeBrowser:
-    def __init__(self, job_list):
+    def __init__(self, job_list, detail_salaries=None):
         self.job_list = job_list
+        self.detail_salaries = detail_salaries or {}
         self.requests = []
         self.current_url = ""
 
@@ -48,7 +49,9 @@ class FakeBrowser:
             return '{"risk": null}'
         if script == JS_EXTRACT_DETAIL:
             return json.dumps({"title": "前端工程师", "company": "示例公司",
-                               "jd": "负责浏览器性能优化"})
+                               "jd": "负责浏览器性能优化",
+                               "salary": self.detail_salaries.get(
+                                   self.current_url.rsplit("/", 1)[-1].removesuffix(".html"), "")})
         raise AssertionError("unexpected browser evaluation")
 
     def close_tab(self, tab):
@@ -76,13 +79,14 @@ class CollectionTargetTests(unittest.TestCase):
         )
 
     def run_with_browser(self, browser, scheduler=None, on_progress=None):
-        with patch("run.ChromeBrowser", return_value=browser):
-            with patch("collector.platforms.boss.PageThrottle.wait", return_value=False):
-                with patch("collector.platforms.boss._wait_or_stop", return_value=False):
-                    with patch("collector.platforms.boss.BossCollector._refresh_font_digits", return_value=False):
-                        return run_collection(self.config, on_record=lambda _: None,
-                                              ai_scheduler=scheduler,
-                                              on_progress=on_progress)
+        with patch("collector.platforms.boss.random.SystemRandom.shuffle", lambda _rng, values: None):
+            with patch("run.ChromeBrowser", return_value=browser):
+                with patch("collector.platforms.boss.PageThrottle.wait", return_value=False):
+                    with patch("collector.platforms.boss._wait_or_stop", return_value=False):
+                        with patch("collector.platforms.boss.BossCollector._refresh_font_digits", return_value=False):
+                            return run_collection(self.config, on_record=lambda _: None,
+                                                  ai_scheduler=scheduler,
+                                                  on_progress=on_progress)
 
     def test_recommendation_ids_rotate_until_prefilter_target(self):
         self.config["ai"]["use_ai_score"] = False
@@ -94,6 +98,37 @@ class CollectionTargetTests(unittest.TestCase):
                          ["a", "b", "a"])
         self.assertEqual(result.reason_code, "target_reached")
         self.assertEqual(result.counts["qualified"], 2)
+
+    def test_undecodable_list_and_detail_salary_skip_only_affected_jobs(self):
+        self.config["ai"]["use_ai_score"] = False
+        self.config["collection"]["target_jobs"] = 1
+        browser = FakeBrowser(
+            lambda _method, _params, _number: [
+                {**api_job("bad-list"), "salaryDesc": "20-\ue999K"},
+                {**api_job("bad-detail"), "salaryDesc": "20-30K"},
+                {**api_job("good"), "salaryDesc": "20-30K"},
+            ],
+            detail_salaries={"bad-detail": "20-\ue999K"},
+        )
+        result = self.run_with_browser(browser)
+        self.assertEqual(result.reason_code, "target_reached")
+        self.assertEqual(result.counts["parse_failed"], 2)
+        self.assertEqual(result.counts["new"], 1)
+        with closing(sqlite3.connect(self.config["safety"]["state_db"])) as conn:
+            store = JobStore(conn)
+            self.assertIsNone(store.get_job("boss", "bad-list"))
+            self.assertIsNone(store.get_job("boss", "bad-detail"))
+            self.assertIsNotNone(store.get_job("boss", "good"))
+
+    def test_cli_stop_salary_mode_still_stops_collection(self):
+        self.config["ai"]["use_ai_score"] = False
+        self.config["collection"].update(target_jobs=1, boss_salary_decode_failure="stop")
+        browser = FakeBrowser(lambda _method, _params, _number: [
+            {**api_job("bad"), "salaryDesc": "20-\ue999K"}, api_job("good"),
+        ])
+        result = self.run_with_browser(browser)
+        self.assertEqual(result.reason_code, "salary_decode_failed")
+        self.assertEqual(result.counts["new"], 0)
 
     def test_ai_target_counts_only_scores_at_or_above_threshold(self):
         self.config["collection"]["target_jobs"] = 1

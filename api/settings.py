@@ -24,7 +24,7 @@ class SettingsError(ValueError):
 _LOCK = Lock()
 _BASIC_KEYS = {
     "collection": {"mode", "encrypt_expect_id", "keywords"},
-    "browser": {"cdp_url"},
+    "browser": {"cdp_url", "silent_background"},
     "profile": {"resume_path"},
     "ai": {"use_ai_score", "use_ai_greeting"},
     "monitoring": {"message_limit", "followup_enabled",
@@ -240,7 +240,7 @@ def _validate_value(section: str, key: str, value: object) -> object:
         if key == "encrypt_expect_id" and any("," in item for item in values):
             raise SettingsError("求职期望 ID 请逐项填写，不要在单项内输入逗号")
         return values
-    if key in {"use_ai_score", "use_ai_greeting", "followup_enabled", "followup_unread",
+    if key in {"silent_background", "use_ai_score", "use_ai_greeting", "followup_enabled", "followup_unread",
                "followup_read_no_reply", "followup_review_required", "filter_review_required"}:
         if type(value) is not bool:
             raise SettingsError(f"{name} 必须是开关值")

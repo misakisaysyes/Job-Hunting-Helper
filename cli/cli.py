@@ -77,6 +77,7 @@ CONFIG_OPTIONS = {
     "risk_lock_minutes": ("safety", "risk_lock_minutes"),
     "state_db": ("safety", "state_db"),
     "cdp_url": ("browser", "cdp_url"),
+    "silent_background": ("browser", "silent_background"),
     "resume_path": ("profile", "resume_path"),
     "education": ("profile", "education"),
     "company_size": ("profile", "company_sizes"),
@@ -166,6 +167,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--exclude-headhunter", action=argparse.BooleanOptionalAction,
                         help="过滤有猎头发布或代招证据的岗位；可用 --no-exclude-headhunter 关闭")
     parser.add_argument("--cdp-url")
+    parser.add_argument("--silent-background", action=argparse.BooleanOptionalAction,
+                        help="在不激活的 Chrome 后台工作标签页采集；可用 --no-silent-background 关闭")
     parser.add_argument("--state-db", type=Path)
     parser.add_argument("--resume-path", type=Path)
     parser.add_argument("--daily-search-page-limit", type=int)
@@ -174,7 +177,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--risk-pause-min-minutes", type=int)
     parser.add_argument("--risk-pause-max-minutes", type=int)
     parser.add_argument("--collection-delay-multiplier", type=float)
-    parser.add_argument("--boss-salary-decode-failure", choices=["stop", "skip_job"])
+    parser.add_argument("--boss-salary-decode-failure", choices=["stop", "skip_job"],
+                        help="薪资字体无法解码时停止采集或跳过该岗位；默认跳过")
     parser.add_argument("--daily-platform-page-limit", type=int)
     parser.add_argument("--risk-lock-minutes", type=int)
     parser.add_argument("--use-ai-score", action=argparse.BooleanOptionalAction,

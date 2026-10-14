@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from browser.boss_monitor import scan_recent_conversations, scan_new_greetings, scan_exchanged_conversations
 from browser.boss_monitor import _effective
+from browser.browser import ChromeBrowser
 from api.followups import proposal
 from api.filtering import delete_candidate, matched_company_term
 from config import DEFAULT_CONFIG, MONITORING_CONFIG
@@ -58,10 +59,11 @@ def _phases_for_run(phase: str) -> dict[str, dict[str, str]]:
     return phases
 
 
-def _counts_for_run(phase: str) -> dict[str, int | str]:
-    counts: dict[str, int | str] = _initial_counts()
+def _counts_for_run(phase: str) -> dict[str, object]:
+    counts: dict[str, object] = _initial_counts()
     if phase in MONITORING_PHASES:
         counts["phase"] = phase
+    counts["phase_states"] = _phases_for_run(phase)
     return counts
 
 
@@ -91,6 +93,8 @@ class MonitoringRun:
             "message": self.message,
             "counts": self.counts.copy(),
             "phases": {key: value.copy() for key, value in self.phases.items()},
+            "phase_runs": self.run_store.latest_monitoring_phases(),
+            "today_phase_stats": self.run_store.today_monitoring_phases(),
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "run_id": self.run_id,
@@ -100,6 +104,8 @@ class MonitoringRun:
             "exchanged_active_days": config["exchanged_active_days"],
             "new_greetings_active_days": config["new_greetings_active_days"],
             "followup_valid_days": config["followup_valid_days"],
+            "followup_cooldown_hours": config["followup_cooldown_hours"],
+            "followup_max_count": config["followup_max_count"],
             "followup_enabled": config["followup_enabled"],
             "filter_review_required": config["filter_review_required"],
         }
@@ -139,7 +145,8 @@ class MonitoringRun:
             self.phase = phase
             state = self._snapshot_locked()
         blocked_terms = deepcopy(DEFAULT_CONFIG["profile"]["blocked_companies"])
-        Thread(target=self._execute, args=(config, run_id, blocked_terms, phase),
+        browser_config = deepcopy(DEFAULT_CONFIG["browser"])
+        Thread(target=self._execute, args=(config, run_id, blocked_terms, phase, browser_config),
                name="web-monitoring", daemon=True).start()
         return state
 
@@ -148,22 +155,34 @@ class MonitoringRun:
             self.message = message
             if self._active_phase:
                 self.phases[self._active_phase]["message"] = message
+                self.counts.get("phase_states", {}).get(self._active_phase, {})["message"] = message
 
     def _phase_progress(self, phase: str, status: str, message: str,
-                        counts: dict[str, int | str] | None = None) -> None:
+                        counts: dict[str, object] | None = None) -> None:
         with self.lock:
-            self.phases[phase] = {"status": status, "message": message}
+            previous = self.phases[phase]
+            state = {"status": status, "message": message}
+            if previous.get("started_at"):
+                state["started_at"] = previous["started_at"]
+            elif status in {"scanning", "processing", "completed", "failed"}:
+                state["started_at"] = _now()
+            if status in {"completed", "failed", "skipped"}:
+                state["finished_at"] = _now()
+            self.phases[phase] = state
             self._active_phase = phase if status in {"scanning", "processing"} else None
             self.message = message
             if counts is not None:
+                counts["phase_states"][phase] = state.copy()
                 self.counts = counts.copy()
             run_id = self.run_id
         if run_id is not None and counts is not None:
             self.run_store.update_counts(run_id, counts, message=message)
 
     def _execute(self, config: dict | None = None, run_id: int | None = None,
-                 blocked_terms: list[str] | None = None, phase: str = "all") -> None:
+                 blocked_terms: list[str] | None = None, phase: str = "all",
+                 browser_config: dict | None = None) -> None:
         counts = _counts_for_run(phase)
+        shared_browser = None
         try:
             with self.lock:
                 self.phases = _phases_for_run(phase)
@@ -175,17 +194,26 @@ class MonitoringRun:
                 config = deepcopy(MONITORING_CONFIG)
             if blocked_terms is None:
                 blocked_terms = deepcopy(DEFAULT_CONFIG["profile"]["blocked_companies"])
+            if browser_config is None:
+                browser_config = deepcopy(DEFAULT_CONFIG["browser"])
+            silent_background = browser_config.get("silent_background", False)
+            if silent_background:
+                shared_browser = ChromeBrowser(browser_config["cdp_url"],
+                                               silent_background=True)
+            shared_browser_options = {"browser": shared_browser} if shared_browser is not None else {}
             conversations = []
             if phase in {"all", "communicated"}:
                 self._phase_progress("communicated", "scanning", "正在扫描「仅沟通」会话列表…", counts)
                 with closing(sqlite3.connect(self.db_path, timeout=10)) as conn:
                     skip_conversation_ids = ConversationStore(conn).terminated_ids("boss")
                 conversations = scan_recent_conversations(
-                    DEFAULT_CONFIG["browser"]["cdp_url"],
+                    browser_config["cdp_url"],
                     message_limit=config["message_limit"],
                     active_days=config["followup_days"],
                     skip_conversation_ids=skip_conversation_ids,
                     on_progress=self._progress,
+                    silent_background=silent_background,
+                    **shared_browser_options,
                 )
                 counts["scanned"] = len(conversations)
                 self._phase_progress("communicated", "processing",
@@ -194,9 +222,11 @@ class MonitoringRun:
             if phase == "exchanged":
                 self._phase_progress("exchanged", "scanning", "正在通过「更多」扫描「有交换」会话列表…", counts)
                 exchanges = scan_exchanged_conversations(
-                    DEFAULT_CONFIG["browser"]["cdp_url"],
+                    browser_config["cdp_url"],
                     active_days=config.get("exchanged_active_days", MONITORING_CONFIG["exchanged_active_days"]),
-                    on_progress=self._progress)
+                    on_progress=self._progress,
+                    silent_background=silent_background,
+                    **shared_browser_options)
                 counts["exchanged_scanned"] = len(exchanges)
                 self._phase_progress("exchanged", "processing",
                                      f"已扫描 {len(exchanges)} 条有交换会话，等待入库", counts)
@@ -204,9 +234,11 @@ class MonitoringRun:
             if phase in {"all", "new_greetings"}:
                 self._phase_progress("new_greetings", "scanning", "正在扫描「新招呼」会话列表…", counts)
                 new_greetings = scan_new_greetings(
-                    DEFAULT_CONFIG["browser"]["cdp_url"],
+                    browser_config["cdp_url"],
                     active_days=config.get("new_greetings_active_days", MONITORING_CONFIG["new_greetings_active_days"]),
-                    on_progress=self._progress)
+                    on_progress=self._progress,
+                    silent_background=silent_background,
+                    **shared_browser_options)
                 counts["new_greetings_scanned"] = len(new_greetings)
                 self._phase_progress("new_greetings", "processing",
                                      f"已扫描 {len(new_greetings)} 条新招呼，等待匹配排除词", counts)
@@ -315,8 +347,10 @@ class MonitoringRun:
                 for index, conversation_id in enumerate(auto_delete, start=1):
                     self._progress(f"正在删除命中排除词的新招呼 {index}/{len(auto_delete)}")
                     try:
-                        delete_candidate(self.db_path, DEFAULT_CONFIG["browser"]["cdp_url"],
-                                         "boss", conversation_id, blocked_terms)
+                        delete_candidate(self.db_path, browser_config["cdp_url"],
+                                         "boss", conversation_id, blocked_terms,
+                                         silent_background=silent_background,
+                                         **shared_browser_options)
                     except Exception:
                         counts["filter_failed"] += 1
                     else:
@@ -331,12 +365,13 @@ class MonitoringRun:
                 self.status = "failed"
                 self.message = f"{type(exc).__name__}: {detail[-450:]}" if detail else type(exc).__name__
                 if self._active_phase:
-                    self.phases[self._active_phase] = {
-                        "status": "failed", "message": self.message,
-                    }
+                    self.phases[self._active_phase].update(
+                        status="failed", message=self.message, finished_at=_now())
                 for phase_state in self.phases.values():
                     if phase_state["status"] in {"scanning", "processing"}:
-                        phase_state.update(status="skipped", message="本轮未完成")
+                        phase_state.update(status="skipped", message="本轮未完成", finished_at=_now())
+                counts["phase_states"] = {key: value.copy() for key, value in self.phases.items()}
+                self.counts = counts.copy()
                 self._active_phase = None
                 self.finished_at = _now()
         else:
@@ -357,6 +392,12 @@ class MonitoringRun:
                 self.counts = counts
                 self._active_phase = None
                 self.finished_at = _now()
+        finally:
+            if shared_browser is not None:
+                try:
+                    shared_browser.close()
+                except Exception:
+                    pass
         if run_id is not None:
             with self.lock:
                 status, message = self.status, self.message

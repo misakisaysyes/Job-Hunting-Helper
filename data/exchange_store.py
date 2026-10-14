@@ -27,6 +27,7 @@ class ExchangeStore:
             resume_delivered_at TEXT NOT NULL DEFAULT '',
             first_seen_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
+            last_scanned_at TEXT NOT NULL DEFAULT '',
             scan_token TEXT NOT NULL,
             active INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (platform, conversation_id)
@@ -35,6 +36,11 @@ class ExchangeStore:
         for name in ("resume_delivery_message_id", "resume_delivered_at"):
             if name not in columns:
                 self.conn.execute(f"ALTER TABLE monitored_exchanges ADD COLUMN {name} TEXT NOT NULL DEFAULT ''")
+        if "last_scanned_at" not in columns:
+            self.conn.execute("""ALTER TABLE monitored_exchanges
+                ADD COLUMN last_scanned_at TEXT NOT NULL DEFAULT ''""")
+            self.conn.execute("""UPDATE monitored_exchanges
+                SET last_scanned_at = updated_at WHERE last_scanned_at = ''""")
         self.conn.execute("""CREATE INDEX IF NOT EXISTS idx_monitored_exchanges_active
             ON monitored_exchanges(active, last_ts DESC)""")
         self.conn.commit()
@@ -47,8 +53,8 @@ class ExchangeStore:
         self.conn.execute("""INSERT INTO monitored_exchanges (
             platform, conversation_id, company, recruiter, job_title, source_job_id,
             last_ts, in_job_pool, resume_delivery_message_id, resume_delivered_at,
-            first_seen_at, updated_at, scan_token, active
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+            first_seen_at, updated_at, last_scanned_at, scan_token, active
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
         ON CONFLICT(platform, conversation_id) DO UPDATE SET
             company = excluded.company, recruiter = excluded.recruiter,
             job_title = excluded.job_title, source_job_id = excluded.source_job_id,
@@ -57,12 +63,13 @@ class ExchangeStore:
                 THEN excluded.resume_delivery_message_id ELSE monitored_exchanges.resume_delivery_message_id END,
             resume_delivered_at = CASE WHEN excluded.resume_delivery_message_id != ''
                 THEN excluded.resume_delivered_at ELSE monitored_exchanges.resume_delivered_at END,
-            updated_at = excluded.updated_at, scan_token = excluded.scan_token, active = 1""",
+            updated_at = excluded.updated_at, last_scanned_at = excluded.last_scanned_at,
+            scan_token = excluded.scan_token, active = 1""",
             (item["platform"], item["conversation_id"], item["company"],
              item["recruiter"], item["job_title"], item["source_job_id"],
              item["last_ts"], int(item["in_job_pool"]),
              item.get("resume_delivery_message_id", ""), item.get("resume_delivered_at", ""),
-             now, now, scan_token))
+             now, now, now, scan_token))
         self.conn.commit()
         return existing is None
 
@@ -89,7 +96,7 @@ class ExchangeStore:
         total = self.conn.execute(f"SELECT COUNT(*) FROM monitored_exchanges {where}", params).fetchone()[0]
         columns = ("platform", "conversation_id", "company", "recruiter", "job_title",
                    "source_job_id", "last_ts", "in_job_pool", "resume_delivery_message_id",
-                   "resume_delivered_at", "first_seen_at", "updated_at")
+                   "resume_delivered_at", "first_seen_at", "updated_at", "last_scanned_at")
         rows = self.conn.execute(f"""SELECT {', '.join(columns)} FROM monitored_exchanges {where}
             ORDER BY last_ts DESC, platform, conversation_id LIMIT ? OFFSET ?""",
             [*params, limit, offset]).fetchall()
@@ -98,7 +105,7 @@ class ExchangeStore:
     def get_conversation(self, platform: str, conversation_id: str) -> dict[str, Any] | None:
         columns = ("platform", "conversation_id", "company", "recruiter", "job_title",
                    "source_job_id", "last_ts", "in_job_pool", "resume_delivery_message_id",
-                   "resume_delivered_at", "first_seen_at", "updated_at")
+                   "resume_delivered_at", "first_seen_at", "updated_at", "last_scanned_at")
         row = self.conn.execute(f"""SELECT {', '.join(columns)} FROM monitored_exchanges
             WHERE platform = ? AND conversation_id = ? AND active = 1""",
             (platform, conversation_id)).fetchone()

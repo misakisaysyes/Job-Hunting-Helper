@@ -150,7 +150,8 @@ def send_greeting(db_path: Path, config: dict, platform: str,
             raise JobActionError("岗位状态已变化或招呼语正在发送，请刷新后检查", 409)
     # Reserve before touching BOSS to prevent duplicate requests from sending twice.
     try:
-        result = send_boss_greeting(job, text, config["browser"]["cdp_url"])
+        result = send_boss_greeting(job, text, config["browser"]["cdp_url"],
+                                    silent_background=config["browser"].get("silent_background", False))
     except Exception as exc:
         # A browser failure can happen after submission; never allow a blind retry.
         note = f"BOSS 发送过程异常：{type(exc).__name__}"
@@ -182,7 +183,8 @@ def confirm_greeting_not_sent(db_path: Path, config: dict, platform: str,
     job = get_job(db_path, config, platform, job_id)
     if job["greeting_send_state"] != "unknown":
         raise JobActionError("仅发送结果未确认的岗位可解除锁定", 409)
-    inspection = inspect_boss_greeting(job, job["greeting"], config["browser"]["cdp_url"])
+    inspection = inspect_boss_greeting(job, job["greeting"], config["browser"]["cdp_url"],
+                                        silent_background=config["browser"].get("silent_background", False))
     with closing(sqlite3.connect(db_path, timeout=10)) as conn:
         store = _store(conn, config)
         if inspection.verified:

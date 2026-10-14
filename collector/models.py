@@ -65,6 +65,9 @@ class JobCandidate:
     company_industry: str = ""
     url: str = ""
     source_keyword: str = ""
+    source_mode: str = ""
+    source_expect_id: str = ""
+    source_city: str = ""
 
     @property
     def storage_id(self) -> str:
@@ -98,6 +101,9 @@ class JobCandidate:
             "source_platform": self.platform,
             "source_job_id": self.source_job_id,
             "source_keyword": self.source_keyword,
+            "source_mode": self.source_mode,
+            "source_expect_id": self.source_expect_id,
+            "source_city": self.source_city,
         }
 
 

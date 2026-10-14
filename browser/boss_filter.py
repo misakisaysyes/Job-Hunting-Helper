@@ -36,18 +36,29 @@ def _confirm_delete_dialog(page: Any) -> str | None:
     return None
 
 
-def delete_new_greeting(cdp_url: str, candidate: dict[str, Any]) -> FilterDeleteResult:
-    return _delete_boss_conversation(cdp_url, candidate, "新招呼")
+def delete_new_greeting(cdp_url: str, candidate: dict[str, Any], *,
+                        silent_background: bool = False,
+                        browser: ChromeBrowser | None = None) -> FilterDeleteResult:
+    return _delete_boss_conversation(cdp_url, candidate, "新招呼",
+                                     silent_background=silent_background, browser=browser)
 
 
-def delete_exchanged_conversation(cdp_url: str, candidate: dict[str, Any]) -> FilterDeleteResult:
-    return _delete_boss_conversation(cdp_url, candidate, "有交换")
+def delete_exchanged_conversation(cdp_url: str, candidate: dict[str, Any], *,
+                                  silent_background: bool = False,
+                                  browser: ChromeBrowser | None = None) -> FilterDeleteResult:
+    return _delete_boss_conversation(cdp_url, candidate, "有交换",
+                                     silent_background=silent_background, browser=browser)
 
 
 def _delete_boss_conversation(cdp_url: str, candidate: dict[str, Any],
-                              tab_label: str) -> FilterDeleteResult:
-    browser = ChromeBrowser(cdp_url)
+                              tab_label: str, *,
+                              silent_background: bool = False,
+                              browser: ChromeBrowser | None = None) -> FilterDeleteResult:
+    owned_browser = browser is None
+    browser = browser or ChromeBrowser(cdp_url, silent_background=silent_background)
     attempted = False
+    page = None
+    dialog_handler = None
     try:
         tab = browser.new_tab("https://www.zhipin.com/robots.txt", background=True)
         if tab is None:
@@ -116,7 +127,8 @@ def _delete_boss_conversation(cdp_url: str, candidate: dict[str, Any],
         if (page.locator(".friend-content.selected").count() != 1
                 or str(selected_avatar or "").split("?", 1)[0] != avatar):
             return FilterDeleteResult(False, False, "当前选中的会话已变化，未删除")
-        page.on("dialog", lambda dialog: dialog.accept())
+        dialog_handler = lambda dialog: dialog.accept()
+        page.on("dialog", dialog_handler)
         attempted = True
         delete_option.click(timeout=5000)
         confirmation_error = _confirm_delete_dialog(page)
@@ -130,4 +142,10 @@ def _delete_boss_conversation(cdp_url: str, candidate: dict[str, Any],
     except Exception as exc:
         return FilterDeleteResult(False, attempted, f"删除会话时出现 {type(exc).__name__}，请人工核查")
     finally:
-        browser.close()
+        if page is not None and dialog_handler is not None:
+            try:
+                page.remove_listener("dialog", dialog_handler)
+            except Exception:
+                pass
+        if owned_browser:
+            browser.close()

@@ -97,17 +97,30 @@ if [[ -n "$state_db" ]]; then
 fi
 
 if ! "$python_bin" - "$api_port" <<'PY'
+import errno
 import socket
 import sys
 
 with socket.socket() as probe:
     try:
         probe.bind(("127.0.0.1", int(sys.argv[1])))
-    except OSError:
+    except OSError as error:
+        if error.errno == errno.EADDRINUSE:
+            print(
+                f"API 端口 {sys.argv[1]} 已被占用。请先停止旧服务，或用 --api-port 指定其他端口。",
+                file=sys.stderr,
+            )
+        elif error.errno in (errno.EACCES, errno.EPERM):
+            print(
+                f"无法监听 API 端口 {sys.argv[1]}：本地网络权限不足 ({error})。"
+                "请在有本地网络权限的终端运行，或为当前运行环境授予权限。",
+                file=sys.stderr,
+            )
+        else:
+            print(f"无法监听 API 端口 {sys.argv[1]}：{error}", file=sys.stderr)
         sys.exit(1)
 PY
 then
-  echo "API 端口 $api_port 已被占用。请先停止旧服务，或用 --api-port 指定其他端口。" >&2
   exit 1
 fi
 

@@ -6,7 +6,7 @@ export default function JobToolbar({ query, onQueryChange, status, onStatusChang
   return <div className="job-toolbar">
     <input type="search" aria-label="关键词筛选" value={query} disabled={busy}
       onChange={(event) => onQueryChange(event.target.value)}
-      placeholder="关键词自动匹配岗位名称、公司、地点、JD、薪资、年限、学历，并可以用&&、||、()组合" />
+      placeholder="关键词自动匹配岗位名称、公司、地点、来源、JD、薪资、年限、学历，并可以用&&、||、()组合" />
     <select aria-label="岗位状态筛选" value={status} disabled={busy}
       onChange={(event) => onStatusChange(event.target.value)}>
       <option value="">{countLabel("全部状态", "all")}</option>

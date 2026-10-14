@@ -18,8 +18,8 @@ export const CONFIG_SECTIONS = [
         },
       },
       {
-        key: "range", title: "本轮范围与结果", description: "控制每组页数、目标采集数及异常薪资的处理。",
-        fields: ["collection.max_pages", "collection.target_jobs", "collection.boss_salary_decode_failure"],
+        key: "range", title: "本轮范围与结果", description: "控制每组页数和目标采集数。",
+        fields: ["collection.max_pages", "collection.target_jobs"],
       },
     ],
   },
@@ -80,6 +80,14 @@ export const CONFIG_SECTIONS = [
         fields: ["monitoring.exchanged_active_days"] },
       { key: "new_greetings", title: "新会话", description: "扫描 BOSS「新招呼」；公司命中排除词时，可选择先审核再删除。",
         fields: ["monitoring.new_greetings_active_days", "monitoring.filter_review_required"] },
+    ],
+  },
+  {
+    key: "browser", title: "运行配置", description: "控制采集、监测和批量操作使用浏览器的方式。",
+    groups: [
+      { key: "background", title: "浏览器后台运行",
+        description: "使用当前已登录的 Chrome，在后台工作标签页执行任务。",
+        fields: ["browser.silent_background"] },
     ],
   },
 ];

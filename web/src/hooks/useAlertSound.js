@@ -1,29 +1,24 @@
 import { useCallback, useEffect, useRef } from "react";
 
-// Match BossHunter's two-round Web Audio completion chime.
+// One short tone for one completed task.
 function playConfirmationPattern(context) {
   const start = context.currentTime;
-  const frequencies = [523.25, 659.25];
-  for (let round = 0; round < 2; round += 1) {
-    frequencies.forEach((frequency, index) => {
-      const oscillator = context.createOscillator();
-      const gain = context.createGain();
-      oscillator.connect(gain);
-      gain.connect(context.destination);
-      oscillator.type = "sine";
-      oscillator.frequency.value = frequency;
-      const time = start + round * 0.4 + index * 0.18;
-      gain.gain.setValueAtTime(0, time);
-      gain.gain.linearRampToValueAtTime(0.28, time + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, time + 0.45);
-      oscillator.start(time);
-      oscillator.stop(time + 0.45);
-    });
-  }
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.type = "sine";
+  oscillator.frequency.value = 659.25;
+  gain.gain.setValueAtTime(0, start);
+  gain.gain.linearRampToValueAtTime(0.28, start + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.001, start + 0.32);
+  oscillator.start(start);
+  oscillator.stop(start + 0.32);
 }
 
 export function useAlertSound() {
   const contextRef = useRef(null);
+  const resumePendingRef = useRef(false);
 
   const getContext = useCallback(() => {
     if (contextRef.current && contextRef.current.state !== "closed") return contextRef.current;
@@ -51,7 +46,11 @@ export function useAlertSound() {
       }
     };
     if (context.state === "suspended") {
-      void context.resume().then(play).catch(() => {});
+      if (resumePendingRef.current) return;
+      resumePendingRef.current = true;
+      void context.resume().then(play).catch(() => {}).finally(() => {
+        resumePendingRef.current = false;
+      });
       return;
     }
     play();

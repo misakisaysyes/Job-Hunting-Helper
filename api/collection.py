@@ -56,6 +56,7 @@ class CollectionRun:
             config = deepcopy(DEFAULT_CONFIG)
             config["safety"]["state_db"] = str(self.db_path)
             config["collection"]["max_jobs"] = 0
+            config["collection"]["boss_salary_decode_failure"] = "skip_job"
             validate_run_config(config)
             if config["ai"]["use_ai_score"] or config["ai"]["use_ai_greeting"]:
                 key_env = config["ai"]["api_key_env"]

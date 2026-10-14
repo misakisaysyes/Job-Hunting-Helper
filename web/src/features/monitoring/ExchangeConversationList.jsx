@@ -27,7 +27,7 @@ export default function ExchangeConversationList({ conversations, total, page, p
             aria-label="全选本页有交换会话" checked={batch.allSelected}
             disabled={loading || Boolean(batch.busy) || !conversations.length}
             onChange={(event) => batch.selectAll(event.target.checked)} /></th>}
-            <th>公司 / HR / 岗位</th><th>岗位池</th><th>附件简历</th><th>入库时间</th><th>操作</th></tr></thead>
+            <th>公司 / HR / 岗位</th><th>岗位池</th><th>附件简历</th><th>更新时间<small>入库时间 / 最近扫描时间</small></th><th>操作</th></tr></thead>
           <tbody>{conversations.map((item) => <tr key={monitoringKey(item)}>
             {batch.batchMode && <td className="select-cell"><input type="checkbox"
               aria-label={`选择有交换会话 ${item.company || item.recruiter || item.conversation_id}`}
@@ -38,9 +38,12 @@ export default function ExchangeConversationList({ conversations, total, page, p
               <div className="job-id">{item.platform} · {item.conversation_id}</div></td>
             <td>{item.in_job_pool ? "池内" : "池外"}</td>
             <td>{item.resume_delivery_message_id
-              ? <><span>已确认发送</span><div className="company">{formatTime(item.resume_delivered_at)}</div></>
+              ? <><span>已确认发送</span><div className="company">回执时间：{formatTime(item.resume_delivered_at)}</div></>
               : "未确认发送"}</td>
-            <td className="date-cell">{formatTime(item.first_seen_at)}</td>
+            <td className="date-cell">
+              <div className="time-block"><span>入库时间</span><time dateTime={item.first_seen_at || undefined}>{formatTime(item.first_seen_at)}</time></div>
+              <div className="time-block"><span>更新时间</span><time dateTime={item.last_scanned_at || undefined}>{formatTime(item.last_scanned_at)}</time></div>
+            </td>
             <td><div className="filter-actions">
               <button className="text-button" type="button" onClick={() => onOpen(item)}
                 disabled={Boolean(busy || opening || deleting || batch.busy)}>

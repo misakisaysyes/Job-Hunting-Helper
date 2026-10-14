@@ -32,7 +32,7 @@ export default function FilterCandidateList({ candidates, total, page, pageSize,
           <thead><tr>{batch.batchMode && <th className="select-cell"><input type="checkbox" aria-label="全选本页过滤候选"
             checked={batch.allSelected} disabled={loading || Boolean(batch.busy) || !candidates.length}
             onChange={(event) => batch.selectAll(event.target.checked)} /></th>}
-            <th>公司 / HR / 岗位</th><th>命中排除词</th><th>状态</th><th>更新时间<small>入库时间 / 更新时间</small></th><th>操作</th></tr></thead>
+            <th>公司 / HR / 岗位</th><th>命中排除词</th><th>状态</th><th>更新时间<small>入库时间 / 最近扫描时间</small></th><th>操作</th></tr></thead>
           <tbody>{candidates.map((candidate) => {
             const key = monitoringKey(candidate);
             return <tr key={key}>
@@ -50,7 +50,7 @@ export default function FilterCandidateList({ candidates, total, page, pageSize,
               {candidate.error && <div className="company">{candidate.error}</div>}</td>
             <td className="date-cell">
               <div className="time-block"><span>入库时间</span><time dateTime={candidate.first_seen_at}>{formatTime(candidate.first_seen_at)}</time></div>
-              <div className="time-block"><span>更新时间</span><time dateTime={candidate.updated_at}>{formatTime(candidate.updated_at)}</time></div>
+              <div className="time-block"><span>更新时间</span><time dateTime={candidate.last_scanned_at || undefined}>{formatTime(candidate.last_scanned_at)}</time></div>
             </td>
             <td><div className="filter-actions">
               {["pending_review", "failed", "unknown"].includes(candidate.status) && <>

@@ -6,6 +6,7 @@ import subprocess
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -80,7 +81,24 @@ class BossModeTests(unittest.TestCase):
         self.assertEqual(params["scene"], "1")
         self.assertEqual(params["scale"], "304,305")
 
-    def test_recommendation_requests_each_expect_id_separately(self) -> None:
+    def test_list_provenance_survives_detail_merge(self) -> None:
+        raw = {"url": "/job_detail/job-id.html", "title": "前端开发", "company": "示例科技"}
+        recommendation = BossCollector._list_candidate(
+            raw, "北京", "101010100", "", mode="recommend", expect_id="91de26example")
+        search = BossCollector._list_candidate(
+            raw, "上海", "101020100", "智能体", mode="search")
+        for candidate, expected in (
+            (recommendation, ("recommend", "91de26example", "")),
+            (search, ("search", "", "上海")),
+        ):
+            merged = BossCollector._merge_detail(
+                candidate, {"jd": "开发 AI 产品"}, "https://www.zhipin.com/job_detail/job-id.html")
+            record = merged.as_job_record()
+            self.assertEqual((record["source_mode"], record["source_expect_id"],
+                              record["source_city"]), expected)
+        self.assertEqual(search.as_job_record()["source_keyword"], "智能体")
+
+    def test_recommendation_shuffles_unique_expect_ids_before_requests(self) -> None:
         calls = []
         checked = []
         completed = []
@@ -99,13 +117,20 @@ class BossModeTests(unittest.TestCase):
             completed_page=lambda city, keyword: checked.append((city, keyword)) or 0,
             on_page_complete=lambda city, keyword, page: completed.append((city, keyword, page)),
         )
-        result = BossCollector(browser=Browser()).collect(
-            request("recommend", expect_ids=["first-id", "second-id"]), hooks,
-        )
+        expect_ids = ["first-id", "second-id", "first-id", "third-id"]
+        with patch("collector.platforms.boss.random.SystemRandom") as random_source:
+            random_source.return_value.shuffle.side_effect = lambda values: values.reverse()
+            result = BossCollector(browser=Browser(), randint=lambda low, high: low).collect(
+                request("recommend", expect_ids=expect_ids), hooks,
+            )
+            random_source.return_value.shuffle.assert_called_once()
         self.assertEqual(result.reason_code, "no_jobs_extracted")
-        self.assertEqual([call[2]["encryptExpectId"] for call in calls], ["first-id", "second-id"])
+        self.assertEqual(expect_ids, ["first-id", "second-id", "first-id", "third-id"])
+        self.assertEqual([call[2]["encryptExpectId"] for call in calls],
+                         ["third-id", "second-id", "first-id"])
         self.assertTrue(all(call[1] == "GET" for call in calls))
-        self.assertEqual(checked, [("北京", "first-id"), ("北京", "second-id")])
+        self.assertEqual(checked, [("北京", "third-id"), ("北京", "second-id"),
+                                   ("北京", "first-id")])
         self.assertEqual(completed, [])  # Empty pages are not checkpointed.
 
     def test_recommendation_response_error_keeps_boss_code_and_message(self) -> None:

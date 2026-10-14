@@ -9,7 +9,6 @@ export const FIELD_LABELS = {
     risk_pause_min_minutes: "风险暂停最短分钟数",
     risk_pause_max_minutes: "风险暂停最长分钟数",
     collection_delay_multiplier: "采集等待倍率",
-    boss_salary_decode_failure: "薪资解码失败时",
   },
   profile: {
     resume_path: "简历文本路径", education: "学历", experience_filters: "工作年限",
@@ -32,7 +31,7 @@ export const FIELD_LABELS = {
     retry_delay_max_seconds: "重试最长等待（秒）",
     ai_api_concurrency: "最大并发请求数",
   },
-  browser: { cdp_url: "Chrome 调试地址" },
+  browser: { cdp_url: "Chrome 调试地址", silent_background: "静默后台运行" },
   safety: {
     daily_platform_page_limit: "每日平台总页面上限",
     risk_lock_minutes: "风险锁定分钟数", state_db: "SQLite 数据库路径",
@@ -54,6 +53,7 @@ export const DISABLED_AI_SCORE_NOTICE =
   "关闭 AI 评分后，预筛通过的岗位按 100 分处理并直接进入「打招呼」；岗位列表显示「100 分 · 预筛已评分」，与 AI 评分区分。";
 
 export const FIELD_HELP = {
+  "browser.silent_background": "开启后，采集、监测和批量操作会复用一个后台 BOSS 工作标签页，不切换当前页面，也不移动系统鼠标。点击“打开岗位/会话”等主动查看操作仍会显示对应页面。需要先启动并登录支持远程调试的 Chrome。",
   "collection.encrypt_expect_id": "推荐流必填；输入 ID 后按空格添加。搜索流须留空。",
   "collection.keywords": "搜索流必填；输入关键词后按空格添加。推荐流须留空。",
   "collection.target_jobs": "达到预筛通过数后停止；启用 AI 评分时，须同时达到评分门槛。",
@@ -89,7 +89,6 @@ export const FIELD_OPTIONS = {
   "collection.platform": [["boss", "BOSS"]],
   "collection.mode": [["recommend", "推荐流"], ["search", "搜索流"]],
   "collection.sort": [["default", "默认"], ["newest", "最新"]],
-  "collection.boss_salary_decode_failure": [["stop", "停止采集"], ["skip_job", "跳过该岗位"]],
   "ai.thinking": [["auto", "自动"], ["enabled", "开启"], ["disabled", "关闭"]],
 };
 

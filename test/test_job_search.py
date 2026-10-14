@@ -17,12 +17,14 @@ class JobSearchTests(unittest.TestCase):
             "source_platform": "boss", "source_job_id": "react", "title": "React 工程师",
             "company": "示例科技", "jd": "前端性能优化", "salary": "25-50K·14薪",
             "city": "北京", "experience": "3-5年", "education": "本科", "recruitment_type": "experienced",
+            "source_mode": "recommend", "source_expect_id": "91de26example", "source_keyword": "",
             "ai_score_status": "scored", "ai_score": 88,
         })
         self.store.save({
             "source_platform": "boss", "source_job_id": "campus", "title": "产品助理",
             "company": "校园公司", "jd": "协助产品设计", "salary": "12-18K·13薪",
             "city": "上海", "experience": "应届生", "education": "硕士", "recruitment_type": "campus",
+            "source_mode": "search", "source_city": "上海", "source_keyword": "智能体",
             "ai_score_status": "scored", "ai_score": 60,
         })
 
@@ -50,6 +52,21 @@ class JobSearchTests(unittest.TestCase):
         ):
             with self.subTest(expression=expression):
                 self.assertEqual(self.find(expression), expected)
+
+    def test_source_label_matches_search_before_pagination(self) -> None:
+        self.assertEqual(self.store.get_job("boss", "react")["source_label"], "推荐流（91de26）")
+        self.assertEqual(self.store.get_job("boss", "campus")["source_label"], "搜索流（上海+智能体）")
+        self.assertEqual(self.find("推荐流"), ["react"])
+        self.assertEqual(self.find("91de26"), ["react"])
+        self.assertEqual(self.find("上海+智能"), ["campus"])
+        self.assertEqual(self.find("搜索流 && 智能体"), ["campus"])
+
+    def test_legacy_recommendation_does_not_guess_expect_id(self) -> None:
+        self.store.save({"source_platform": "boss", "source_job_id": "legacy",
+                         "title": "旧岗位", "source_keyword": ""})
+        job = self.store.get_job("boss", "legacy")
+        self.assertEqual(job["source_label"], "推荐流（期望 ID 未记录）")
+        self.assertEqual(self.find("期望 ID 未记录"), ["legacy"])
 
     def test_typed_terms_only_match_their_fields(self) -> None:
         for expression in ("本科", "3-5年", "4年", "社招", "25-50k", "40K", "14薪"):

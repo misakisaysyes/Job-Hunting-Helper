@@ -33,7 +33,9 @@ _BOSS_CHAT_ROW_MATCHES = """({avatar, name, brand, selectedOnly = false}) => {
 
 
 class ChromeBrowser:
-    def __init__(self, cdp_url: str = "http://127.0.0.1:9222") -> None:
+    def __init__(self, cdp_url: str = "http://127.0.0.1:9222", *,
+                 silent_background: bool = False) -> None:
+        self._cdp_url = cdp_url
         self._playwright = sync_playwright().start()
         try:
             self._browser = self._playwright.chromium.connect_over_cdp(cdp_url)
@@ -45,12 +47,70 @@ class ChromeBrowser:
             raise
         self._tabs: dict[str, Any] = {}
         self._list_worker: str | None = None
+        self._background_worker: str | None = None
+        self._background_browser: Any | None = None
+        self.silent_background = silent_background
+
+    def _new_background_page(self) -> Any:
+        """Create an unfocused Chrome tab and wait until Patchright sees that target."""
+        marker = f"about:blank#job-hunting-helper-{uuid4().hex}"
+        session = self._browser.new_browser_cdp_session()
+        chrome_target_id = None
+        worker_browser = None
+        try:
+            chrome_target_id = session.send("Target.createTarget", {
+                "url": marker, "background": True, "focus": False,
+            })["targetId"]
+            # Patchright does not discover targets created through an existing
+            # CDP connection. A second connection attaches to the new tab
+            # without activating it in Chrome.
+            worker_browser = self._playwright.chromium.connect_over_cdp(self._cdp_url)
+            if not worker_browser.contexts:
+                raise RuntimeError("Chrome 没有可用的后台浏览器上下文")
+            worker_context = worker_browser.contexts[0]
+            deadline = time.monotonic() + 8
+            while time.monotonic() < deadline:
+                page = next((item for item in worker_context.pages
+                             if not item.is_closed() and item.url == marker), None)
+                if page is not None:
+                    self._background_browser = worker_browser
+                    return page
+                time.sleep(0.05)
+            raise RuntimeError("Chrome 未暴露后台工作标签页")
+        except Exception:
+            if worker_browser is not None:
+                try:
+                    worker_browser.close()
+                except Exception:
+                    pass
+            if chrome_target_id is not None:
+                try:
+                    session.send("Target.closeTarget", {"targetId": chrome_target_id})
+                except Exception:
+                    pass
+            raise
+        finally:
+            try:
+                session.detach()
+            except Exception:
+                pass
 
     def new_tab(self, url: str, background: bool = False) -> str | None:
         # Chrome owns the profile. Only pages created by this adapter are closed.
-        page = self._context.new_page()
+        if background and self.silent_background and self._background_worker:
+            if self.navigate(self._background_worker, url):
+                return self._background_worker
+            self.close_tab(self._background_worker)
+        try:
+            page = (self._new_background_page() if background and self.silent_background
+                    else self._context.new_page())
+        except Exception:
+            # Never silently fall back to a foreground page in silent mode.
+            return None
         target_id = str(uuid4())
         self._tabs[target_id] = page
+        if background and self.silent_background:
+            self._background_worker = target_id
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=20000)
         except BrowserTimeout:
@@ -206,11 +266,16 @@ class ChromeBrowser:
         if not path.startswith("/wapi/zpgeek/") or method not in {"GET", "POST"}:
             raise ValueError("不支持的 BOSS 列表请求")
         try:
-            if self._list_worker is None or self._tabs[self._list_worker].is_closed():
+            worker = self._tabs.get(self._list_worker) if self._list_worker else None
+            if worker is None or worker.is_closed():
                 # A same-origin document is needed for browser fetch. This static
                 # page does not run the recommendation page's automatic request.
                 self._list_worker = self.new_tab("https://www.zhipin.com/robots.txt", background=True)
             if self._list_worker is None:
+                return {"error": "worker_page_unavailable"}
+            if (getattr(self, "silent_background", False)
+                    and self._tabs[self._list_worker].url != "https://www.zhipin.com/robots.txt"
+                    and not self.navigate(self._list_worker, "https://www.zhipin.com/robots.txt")):
                 return {"error": "worker_page_unavailable"}
             return self._tabs[self._list_worker].evaluate("""async ({path, method, fields, timestamp}) => {
                 const url = new URL(path, location.origin);
@@ -264,19 +329,35 @@ class ChromeBrowser:
 
     def close_tab(self, target_id: str) -> bool:
         page = self._tabs.pop(target_id, None)
+        is_background_worker = target_id == self._background_worker
         if target_id == self._list_worker:
             self._list_worker = None
+        if is_background_worker:
+            self._background_worker = None
         if page is None:
             return False
         try:
             page.close()
         except Exception:
             return False
+        finally:
+            if is_background_worker and self._background_browser is not None:
+                try:
+                    self._background_browser.close()
+                except Exception:
+                    pass
+                self._background_browser = None
         return True
 
     def close(self) -> None:
         for target_id in list(self._tabs):
             self.close_tab(target_id)
+        if self._background_browser is not None:
+            try:
+                self._background_browser.close()
+            except Exception:
+                pass
+            self._background_browser = None
         self._playwright.stop()
 
     def __enter__(self) -> "ChromeBrowser":

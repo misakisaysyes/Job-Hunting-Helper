@@ -7,6 +7,8 @@ import json
 import sqlite3
 from typing import Any, Callable
 
+from data.job_source import job_source_label
+
 JOB_STATUSES = frozenset({
     "scored", "greeting_ready", "greeted",
     "ended_monitoring_expired", "ended_rejected", "ended_applied", "ended_forced",
@@ -260,6 +262,7 @@ class JobStore:
             ai_score_reason=reason,
             ai_score_error=error,
         )
+        record["source_label"] = job_source_label(record)
         return record
 
     def get_job(self, platform: str, source_job_id: str) -> dict[str, Any] | None:

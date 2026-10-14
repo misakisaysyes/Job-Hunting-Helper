@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { currentTaskRuns, hasNewTaskCompletion } from "./taskCompletion.js";
+import { currentTaskRuns, hasNewTaskCompletion, newlyCompletedRuns } from "./taskCompletion.js";
 
 const run = (run_id, status) => ({ run_id, status });
 
@@ -38,4 +38,6 @@ test("batch followup and deletion completions each alert once", () => {
   } });
   assert.equal(hasNewTaskCompletion(after, deleted), true);
   assert.equal(hasNewTaskCompletion(deleted, deleted), false);
+  assert.deepEqual(newlyCompletedRuns(before, after), ["monitoring_followup:4"]);
+  assert.deepEqual(newlyCompletedRuns(after, deleted), ["monitoring_delete:5"]);
 });

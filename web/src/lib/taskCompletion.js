@@ -7,12 +7,17 @@ export function currentTaskRuns(data) {
   return Object.fromEntries(TASK_TYPES.map((type) => [type, data.current?.[type] ?? null]));
 }
 
-export function hasNewTaskCompletion(previous, current) {
-  if (!previous) return false;
-  return TASK_TYPES.some((type) => {
+export function newlyCompletedRuns(previous, current) {
+  if (!previous) return [];
+  return TASK_TYPES.flatMap((type) => {
     const before = previous[type];
     const after = current[type];
-    if (after?.run_id == null || !TERMINAL_STATUSES.has(after.status)) return false;
-    return before?.run_id !== after.run_id || !TERMINAL_STATUSES.has(before.status);
+    if (after?.run_id == null || !TERMINAL_STATUSES.has(after.status)) return [];
+    return before?.run_id !== after.run_id || !TERMINAL_STATUSES.has(before.status)
+      ? [`${type}:${after.run_id}`] : [];
   });
+}
+
+export function hasNewTaskCompletion(previous, current) {
+  return newlyCompletedRuns(previous, current).length > 0;
 }

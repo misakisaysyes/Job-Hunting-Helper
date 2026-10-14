@@ -12,22 +12,29 @@ from browser.browser import ChromeBrowser
 
 CHAT_URL = "https://www.zhipin.com/web/geek/chat"
 RESUME_DELIVERED = "对方已同意，您的附件简历已发送给对方"
+RESUME_VIEWED = "对方已查看了您的附件简历"
 
 
 def _resume_delivery_evidence(messages: list[dict[str, Any]]) -> tuple[str, str]:
-    """Accept only BOSS's explicit attachment-resume delivery confirmation."""
+    """Prefer BOSS's send receipt; a verified view also proves delivery."""
+    viewed_receipt = ("", "")
     for raw in reversed(messages):
         message = _normalise_message(raw, "")
-        if (message["text"] == RESUME_DELIVERED and message["biz_type"] == "14"
-                and message["message_id"]):
-            try:
-                timestamp = int(message["sent_at"])
-                seconds = timestamp / 1000 if timestamp > 100_000_000_000 else timestamp
-                sent_at = datetime.fromtimestamp(seconds, timezone.utc).isoformat()
-            except (ValueError, OverflowError, OSError):
-                sent_at = ""
-            return message["message_id"], sent_at
-    return "", ""
+        sent_receipt = message["text"] == RESUME_DELIVERED and message["biz_type"] == "14"
+        viewed = message["text"] == RESUME_VIEWED and message["biz_type"] == "21050035"
+        if not message["message_id"] or not (sent_receipt or viewed):
+            continue
+        try:
+            timestamp = int(message["sent_at"])
+            seconds = timestamp / 1000 if timestamp > 100_000_000_000 else timestamp
+            receipt_at = datetime.fromtimestamp(seconds, timezone.utc).isoformat()
+        except (ValueError, OverflowError, OSError):
+            receipt_at = ""
+        if sent_receipt:
+            return message["message_id"], receipt_at
+        if not viewed_receipt[0]:
+            viewed_receipt = message["message_id"], receipt_at
+    return viewed_receipt
 
 
 def _effective(message: dict[str, Any]) -> bool:
@@ -194,15 +201,19 @@ def _tab_friends(page: Any, tab_label: str | None, active_days: int | None,
     if tab_label == "仅沟通":
         selected = [{**row, "list_receipt_status": receipt_by_identity.get(identity(row), "")}
                     for row in selected]
+    page.remove_listener("response", collect_response)
     return selected
 
 
 def scan_exchanged_conversations(cdp_url: str, *,
                                  active_days: int | None = None,
-                                 on_progress: Callable[[str], None] | None = None
+                                 on_progress: Callable[[str], None] | None = None,
+                                 silent_background: bool = False,
+                                 browser: ChromeBrowser | None = None,
                                  ) -> list[dict[str, Any]]:
     """Read Exchange rows and verify resume delivery from each chat's history."""
-    browser = ChromeBrowser(cdp_url)
+    owned_browser = browser is None
+    browser = browser or ChromeBrowser(cdp_url, silent_background=silent_background)
     try:
         tab = browser.new_tab("https://www.zhipin.com/robots.txt", background=True)
         if tab is None:
@@ -235,14 +246,18 @@ def scan_exchanged_conversations(cdp_url: str, *,
                 on_progress(f"已核对「有交换」会话 {index}/{len(friends)} 条的附件简历发送记录")
         return results
     finally:
-        browser.close()
+        if owned_browser:
+            browser.close()
 
 
 def scan_new_greetings(cdp_url: str, *, active_days: int | None = None,
-                       on_progress: Callable[[str], None] | None = None
+                       on_progress: Callable[[str], None] | None = None,
+                       silent_background: bool = False,
+                       browser: ChromeBrowser | None = None,
                        ) -> list[dict[str, Any]]:
     """Read company names from the New Greetings list; preserve every unread badge."""
-    browser = ChromeBrowser(cdp_url)
+    owned_browser = browser is None
+    browser = browser or ChromeBrowser(cdp_url, silent_background=silent_background)
     try:
         tab = browser.new_tab("https://www.zhipin.com/robots.txt", background=True)
         if tab is None:
@@ -259,16 +274,20 @@ def scan_new_greetings(cdp_url: str, *, active_days: int | None = None,
             "avatar": str(friend.get("avatar") or "").split("?", 1)[0],
         } for friend in friends]
     finally:
-        browser.close()
+        if owned_browser:
+            browser.close()
 
 
 def scan_recent_conversations(cdp_url: str, *, message_limit: int,
                               active_days: int | None = None,
                               skip_conversation_ids: set[str] | None = None,
-                              on_progress: Callable[[str], None] | None = None
+                              on_progress: Callable[[str], None] | None = None,
+                              silent_background: bool = False,
+                              browser: ChromeBrowser | None = None,
                               ) -> list[dict[str, Any]]:
     """Read history only for unanswered outbound messages in the Communication tab."""
-    browser = ChromeBrowser(cdp_url)
+    owned_browser = browser is None
+    browser = browser or ChromeBrowser(cdp_url, silent_background=silent_background)
     try:
         tab = browser.new_tab("https://www.zhipin.com/robots.txt", background=True)
         if tab is None:
@@ -309,4 +328,5 @@ def scan_recent_conversations(cdp_url: str, *, message_limit: int,
                 on_progress(f"已读取 {index}/{len(selected)} 条会话")
         return results
     finally:
-        browser.close()
+        if owned_browser:
+            browser.close()
