@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from typing import Any, Callable
 
+from data.job_source import job_source_label
+
 
 class SearchSyntaxError(ValueError):
     pass
@@ -90,8 +92,9 @@ def _matches_term(job: dict[str, Any], raw_term: str) -> bool:
         return re.search(rf"(?<!\d){pay_count.group(1)}薪", str(job.get("salary") or "")) is not None
 
     needle = term.casefold()
-    return any(needle in str(job.get(field) or "").casefold()
-               for field in ("title", "company", "city", "jd", "salary", "experience", "education"))
+    return (any(needle in str(job.get(field) or "").casefold()
+                for field in ("title", "company", "city", "jd", "salary", "experience", "education"))
+            or needle in job_source_label(job).casefold())
 
 
 def compile_search(expression: str) -> Callable[[dict[str, Any]], bool]:

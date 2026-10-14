@@ -339,7 +339,8 @@ class FollowupTests(unittest.TestCase):
             with patch("api.followups.send_boss_followup", return_value=FollowupResult(
                     True, False, "已确认", "101")) as send:
                 result = send_followup(path, "cdp", "boss", "123")
-            send.assert_called_once_with("cdp", "123", "100", self.greeting, anchor_text=self.greeting)
+            send.assert_called_once_with("cdp", "123", "100", self.greeting,
+                                         anchor_text=self.greeting, silent_background=False)
             self.assertEqual(result["conversation"]["followup_count"], 1)
             self.assertEqual(result["conversation"]["conversation_status"], "unread")
             with self.assertRaises(JobActionError):
@@ -438,7 +439,7 @@ class FollowupTests(unittest.TestCase):
                 message_limit=10,
                 active_days=4,
                 skip_conversation_ids=set(),
-                on_progress=second._progress)
+            on_progress=second._progress, silent_background=False)
             with closing(sqlite3.connect(path)) as conn:
                 saved = ConversationStore(conn).get_conversation("boss", "123")
             self.assertEqual(saved["followup_status"], "pending_review")
@@ -501,7 +502,8 @@ class FollowupTests(unittest.TestCase):
                     True, False, "已确认", "101")) as send:
                 result = send_followup(path, "cdp", "boss", "123", text=edited,
                                        anchor_id="100", expected_text=self.greeting)
-            send.assert_called_once_with("cdp", "123", "100", edited, anchor_text=self.greeting)
+            send.assert_called_once_with("cdp", "123", "100", edited,
+                                         anchor_text=self.greeting, silent_background=False)
             self.assertEqual(result["conversation"]["followup_count"], 1)
             self.assertEqual(result["conversation"]["followup_text"], "")
             self.assertEqual(result["conversation"]["last_followup_text"], edited)

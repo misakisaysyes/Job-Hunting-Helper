@@ -32,6 +32,7 @@ function toDraft(settings, cityOptions = []) {
       key, Array.isArray(value) ? [...value] : typeof value === "boolean" ? value : String(value),
     ])),
   ]));
+  draft.browser.silent_background = settings.browser.silent_background === true;
   if (!draft.collection.cities.length && cityOptions.includes(draft.collection.city)) {
     draft.collection.cities = [draft.collection.city];
   }
@@ -67,7 +68,8 @@ function toPayload(draft, settings) {
   payload.collection.max_jobs = 0;
   delete payload.ai.api_key_env;
   delete payload.collection.test_prefilter;
-  delete payload.browser;
+  delete payload.collection.boss_salary_decode_failure;
+  payload.browser = { silent_background: payload.browser.silent_background };
   delete payload.safety.state_db;
   return payload;
 }
@@ -130,7 +132,7 @@ export default function ConfigurationPage() {
   const [uploadingResume, setUploadingResume] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [notice, setNotice] = useState(null);
-  const [openSections, setOpenSections] = useState(() => new Set(["collection", "safety"]));
+  const [openSections, setOpenSections] = useState(() => new Set(["browser", "collection", "safety"]));
 
   useEffect(() => {
     let active = true;
@@ -240,7 +242,7 @@ export default function ConfigurationPage() {
           : "填写后保存到本项目的 .config.credentials.yaml，再点击生效配置；也可以继续使用环境变量。"}</p>
       </div>;
     }
-    const original = settings[section][name];
+    const original = path === "browser.silent_background" ? false : settings[section][name];
     if (path === "collection.cities") {
       return <CityMultiSelect key={path} options={cityOptions} values={draft.collection.cities}
         onChange={(value) => update(section, name, value)} />;

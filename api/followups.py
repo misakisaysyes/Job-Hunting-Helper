@@ -12,6 +12,7 @@ from typing import Any
 from api.jobs import JobActionError
 from ai.scheduler import AITaskScheduler
 from browser.boss_followup import send_boss_followup
+from browser.browser import ChromeBrowser
 from browser.boss_monitor import _effective
 from config import MONITORING_CONFIG
 from data.conversation_store import ConversationStore, resolve_original_greeting
@@ -294,7 +295,9 @@ def send_followup(db_path: Path, cdp_url: str, platform: str,
                   conversation_id: str, *, max_count: int | None = None,
                   valid_days: int | None = None,
                   text: object = None, anchor_id: str | None = None,
-                  expected_text: str | None = None) -> dict:
+                  expected_text: str | None = None,
+                  silent_background: bool = False,
+                  browser: ChromeBrowser | None = None) -> dict:
     if platform != "boss":
         raise JobActionError("当前仅支持 BOSS 追问", 400)
     if text is not None:
@@ -316,7 +319,9 @@ def send_followup(db_path: Path, cdp_url: str, platform: str,
         raise JobActionError("会话或追问草稿已变化，当前没有可发送的待审核追问", 409)
     try:
         result = send_boss_followup(cdp_url, conversation_id,
-                                    claimed["anchor_id"], claimed["text"], anchor_text=claimed["anchor_text"])
+                                    claimed["anchor_id"], claimed["text"], anchor_text=claimed["anchor_text"],
+                                    silent_background=silent_background,
+                                    **({"browser": browser} if browser is not None else {}))
     except Exception as exc:
         with closing(sqlite3.connect(db_path, timeout=10)) as conn:
             ConversationStore(conn).finish_followup(

@@ -21,10 +21,15 @@ class FollowupResult:
 
 
 def send_boss_followup(cdp_url: str, conversation_id: str, anchor_id: str,
-                       text: str, *, anchor_text: str | None = None) -> FollowupResult:
+                       text: str, *, anchor_text: str | None = None,
+                       silent_background: bool = False,
+                       browser: ChromeBrowser | None = None) -> FollowupResult:
     """Recheck the exact chat and latest message before one UI send."""
-    browser = ChromeBrowser(cdp_url)
+    owned_browser = browser is None
+    browser = browser or ChromeBrowser(cdp_url, silent_background=silent_background)
     attempted = False
+    page = None
+    collect = None
     expected_anchor_text = text.strip() if anchor_text is None else anchor_text.strip()
     try:
         tab = browser.new_tab("https://www.zhipin.com/robots.txt", background=True)
@@ -131,4 +136,10 @@ def send_boss_followup(cdp_url: str, conversation_id: str, anchor_id: str,
     except Exception as exc:
         return FollowupResult(False, attempted, f"追问发送异常：{type(exc).__name__}")
     finally:
-        browser.close()
+        if page is not None and collect is not None:
+            try:
+                page.remove_listener("response", collect)
+            except Exception:
+                pass
+        if owned_browser:
+            browser.close()

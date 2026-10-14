@@ -265,6 +265,20 @@ class TaskRunStoreTests(unittest.TestCase):
             self.assertEqual(row["status"], "completed")
             self.assertEqual(row["counts"], {"seen": 4, "new": 2})
 
+    def test_web_collection_ignores_legacy_stop_salary_setting(self):
+        with TemporaryDirectory() as temp, \
+                patch.dict(DEFAULT_CONFIG["collection"], {
+                    "mode": "recommend", "encrypt_expect_id": ["test-id"],
+                    "boss_salary_decode_failure": "stop",
+                }), patch.dict(DEFAULT_CONFIG["ai"], {
+                    "use_ai_score": False, "use_ai_greeting": False,
+                }), patch("api.collection.Thread") as thread:
+            runner = CollectionRun(Path(temp) / "tasks.sqlite3")
+            runner.start()
+            config = thread.call_args.kwargs["args"][0]
+            self.assertEqual(config["collection"]["boss_salary_decode_failure"], "skip_job")
+            self.assertEqual(DEFAULT_CONFIG["collection"]["boss_salary_decode_failure"], "stop")
+
     def test_running_collection_counts_are_visible_in_both_status_and_today(self):
         with TemporaryDirectory() as temp:
             db_path = Path(temp) / "tasks.sqlite3"

@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 
 LOCAL_ZONE = ZoneInfo("Asia/Shanghai")
 TASK_TYPES = ("collection", "monitoring", "monitoring_followup", "monitoring_delete")
+MONITORING_PHASES = ("communicated", "exchanged", "new_greetings")
 TASK_LABELS = {"collection": "采集", "monitoring": "扫描会话",
                "monitoring_followup": "批量追问", "monitoring_delete": "批量删除会话"}
 
@@ -89,6 +90,76 @@ class TaskRunStore:
                 started_at, finished_at FROM task_runs WHERE task_type = ? ORDER BY id DESC LIMIT 1""",
                 (task_type,)).fetchone()
         return self._run_snapshot(row)
+
+    def latest_monitoring_phases(self) -> dict[str, dict]:
+        """Return each scan's latest run and last completed result, across API restarts."""
+        latest: dict[str, dict] = {}
+        completed: dict[str, dict] = {}
+        with closing(self._connect()) as conn:
+            rows = conn.execute("""SELECT id, task_type, status, message, counts_json,
+                started_at, finished_at FROM task_runs
+                WHERE task_type = 'monitoring' ORDER BY id DESC""")
+            for row in rows:
+                run = self._run_snapshot(row)
+                counts = run["counts"]
+                scope = counts.get("phase", "all")
+                phases = (scope,) if scope in MONITORING_PHASES else ("communicated", "new_greetings")
+                phase_states = counts.get("phase_states")
+                phase_states = phase_states if isinstance(phase_states, dict) else {}
+                for phase in phases:
+                    state = phase_states.get(phase) or {}
+                    status = state.get("status") or run["status"]
+                    if status == "not_run" or (status == "pending" and scope != phase):
+                        continue
+                    if run["status"] in {"failed", "stopped", "interrupted"} and status in {
+                            "pending", "scanning", "processing", "running"}:
+                        status = run["status"]
+                    item = {
+                        "run_id": run["run_id"], "status": status,
+                        "message": state.get("message") or run["message"],
+                        "counts": counts,
+                        "started_at": state.get("started_at") or run["started_at"],
+                        "finished_at": state.get("finished_at") or run["finished_at"],
+                    }
+                    latest.setdefault(phase, item)
+                    if status == "completed":
+                        completed.setdefault(phase, item)
+                if len(latest) == len(completed) == len(MONITORING_PHASES):
+                    break
+        return {phase: {**item, "last_completed": completed.get(phase)}
+                for phase, item in latest.items()}
+
+    def today_monitoring_phases(self, *, now: datetime | None = None) -> dict[str, dict]:
+        """Count each phase's runs and completed scan volume for the local day."""
+        day = (now or datetime.now(timezone.utc)).astimezone(LOCAL_ZONE).date()
+        start = datetime.combine(day, time.min, LOCAL_ZONE).astimezone(timezone.utc).isoformat()
+        stop = datetime.combine(day + timedelta(days=1), time.min,
+                                LOCAL_ZONE).astimezone(timezone.utc).isoformat()
+        stats = {phase: {"runs": 0, "scanned_total": 0, "latest_run_id": None}
+                 for phase in MONITORING_PHASES}
+        scanned_keys = {"communicated": "scanned", "exchanged": "exchanged_scanned",
+                        "new_greetings": "new_greetings_scanned"}
+        with closing(self._connect()) as conn:
+            rows = conn.execute("""SELECT id, status, counts_json FROM task_runs
+                WHERE task_type = 'monitoring' AND started_at >= ? AND started_at < ?
+                ORDER BY id""", (start, stop))
+            for run_id, run_status, raw_counts in rows:
+                counts = json.loads(raw_counts)
+                scope = counts.get("phase", "all")
+                phases = (scope,) if scope in MONITORING_PHASES else ("communicated", "new_greetings")
+                states = counts.get("phase_states")
+                states = states if isinstance(states, dict) else {}
+                for phase in phases:
+                    state = states.get(phase) or {}
+                    status = state.get("status") or run_status
+                    if status == "not_run" or (status == "pending" and scope != phase):
+                        continue
+                    item = stats[phase]
+                    item["runs"] += 1
+                    item["latest_run_id"] = run_id
+                    if status == "completed":
+                        item["scanned_total"] += counts.get(scanned_keys[phase], 0)
+        return stats
 
     @staticmethod
     def _run_snapshot(row: tuple | None) -> dict | None:

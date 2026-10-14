@@ -31,6 +31,9 @@ class ConversationBrowserTests(unittest.TestCase):
         browser._context = MagicMock()
         browser._playwright = MagicMock()
         browser._tabs = {}
+        browser._list_worker = None
+        browser._background_worker = None
+        browser._background_browser = None
         page = browser._context.new_page.return_value
         page.url = CHAT_URL
         page.on.side_effect = lambda event, callback: callback(friend_response(

@@ -8,6 +8,7 @@ import sqlite3
 
 from api.jobs import JobActionError
 from browser.boss_filter import delete_new_greeting
+from browser.browser import ChromeBrowser
 from data.filter_store import FilterStore
 
 
@@ -19,7 +20,9 @@ def matched_company_term(company: str, terms: list[str]) -> str:
 
 def delete_candidate(db_path: Path, cdp_url: str, platform: str,
                      conversation_id: str, blocked_terms: list[str], *,
-                     confirm_still_present: bool = False) -> dict:
+                     confirm_still_present: bool = False,
+                     silent_background: bool = False,
+                     browser: ChromeBrowser | None = None) -> dict:
     if platform != "boss":
         raise JobActionError("当前仅支持 BOSS 新招呼过滤", 400)
     with closing(sqlite3.connect(db_path, timeout=10)) as conn:
@@ -35,7 +38,9 @@ def delete_candidate(db_path: Path, cdp_url: str, platform: str,
     if claimed is None:
         raise JobActionError("删除候选已被处理，请刷新列表", 409)
     try:
-        result = delete_new_greeting(cdp_url, claimed)
+        result = delete_new_greeting(cdp_url, claimed,
+                                     silent_background=silent_background,
+                                     **({"browser": browser} if browser is not None else {}))
     except Exception as exc:
         with closing(sqlite3.connect(db_path, timeout=10)) as conn:
             FilterStore(conn).finish_delete(platform, conversation_id, outcome="unknown",

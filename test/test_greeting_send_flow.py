@@ -458,7 +458,7 @@ class GreetingSendFlowTests(unittest.TestCase):
                 self.assertFalse(store.mark_greeting_sent_after_verification(
                     "boss", "job-id", chat_url))
 
-    def test_failure_before_send_button_is_retryable(self) -> None:
+    def test_missing_input_after_chat_entry_requires_manual_check(self) -> None:
         job = {"source_job_id": "job-id", "url": "https://www.zhipin.com/job_detail/job-id.html"}
         with patch("browser.boss_message.ChromeBrowser") as browser_type, \
                 patch("browser.boss_message._chat_matches_job", return_value=True), \
@@ -480,7 +480,7 @@ class GreetingSendFlowTests(unittest.TestCase):
             page.locator.side_effect = [button, input_box]
             result = send_boss_greeting(job, "您好", "http://127.0.0.1:9222")
             self.assertFalse(result.verified)
-            self.assertFalse(result.uncertain)
+            self.assertTrue(result.uncertain)
             self.assertIn("8 秒内未出现", result.message)
 
     def test_click_error_keeps_send_result_uncertain(self) -> None:

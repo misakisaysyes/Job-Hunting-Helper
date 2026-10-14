@@ -8,7 +8,6 @@ import json
 import random
 import re
 import time
-from dataclasses import replace
 from typing import Any, Callable
 from urllib.parse import urlencode
 
@@ -137,13 +136,12 @@ def _salary_decode_failure_action(config: Any) -> str:
 
     BOSS remaps digits onto private-use codepoints and reshuffles that mapping
     on every font load, so an unknown font can never be guessed safely:
-    ``stop`` (default) aborts the run instead of judging jobs by a salary we
-    cannot read, while ``skip_job`` keeps collecting and leaves the salary
-    empty so ``profile.filter_unparsed_salary`` decides as usual.
+    ``stop`` aborts the run instead of judging jobs by a salary we cannot
+    read, while ``skip_job`` skips that job and continues the scan.
     """
     collection = config.get("collection") if isinstance(config, dict) else None
     value = collection.get("boss_salary_decode_failure") if isinstance(collection, dict) else None
-    return value if value in _SALARY_DECODE_ACTIONS else "stop"
+    return value if value in _SALARY_DECODE_ACTIONS else "skip_job"
 
 
 def _filter_values(value: Any) -> list[str]:
@@ -432,7 +430,6 @@ class BossCollector:
         page_failures = 0
         seen_jobs = 0
         incomplete_combos = 0
-        undecodable_salary: set[str] = set()
         salary_decode_action = _salary_decode_failure_action(self.config)
 
         def limited(reason: str) -> PlatformCollectionResult:
@@ -512,6 +509,10 @@ class BossCollector:
             return {generate_boss_job_id(job["url"]) for job in jobs
                     if isinstance(job, dict) and job.get("url")}
 
+        recommend_expect_ids = list(dict.fromkeys(request.encrypt_expect_id)) if request.mode == "recommend" else []
+        if recommend_expect_ids:
+            random.SystemRandom().shuffle(recommend_expect_ids)
+
         combos: list[tuple[str, str, str, str]] = []
         for city in request.cities or [""]:
             city_code = self.resolve_city_code(city, request) if city else ""
@@ -522,7 +523,7 @@ class BossCollector:
                 combos.extend((city, city_code, keyword, "") for keyword in request.keywords)
             else:
                 combos.extend((city, city_code, "", expect_id)
-                              for expect_id in dict.fromkeys(request.encrypt_expect_id))
+                              for expect_id in recommend_expect_ids)
         if not combos:
             return PlatformCollectionResult(
                 self.platform, "completed_with_shortage", "no_valid_city", "没有有效的 BOSS 搜索组合"
@@ -593,6 +594,10 @@ class BossCollector:
                             self.platform, "completed_with_shortage", "missing_encrypt_expect_id",
                             "BOSS 推荐流请求缺少非空 encryptExpectId，已停止本轮采集",
                         )
+                    if isinstance(response, dict) and response.get("error") == "worker_page_unavailable":
+                        hooks.on_parse_failed("BOSS 列表工作标签页不可用")
+                        return PlatformCollectionResult(self.platform, "completed_with_shortage", "worker_page_unavailable",
+                                                        "BOSS 列表工作标签页不可用，已停止本轮采集")
                     if not isinstance(response, dict) or response.get("error"):
                         hooks.on_parse_failed("BOSS 列表接口请求失败")
                         return PlatformCollectionResult(self.platform, "completed_with_shortage", "api_request_failed",
@@ -645,7 +650,10 @@ class BossCollector:
                         if hooks.stop_event is not None and hooks.stop_event.is_set():
                             return PlatformCollectionResult(self.platform, "stopped", "user_stopped", "用户已停止")
                         raw = _decode_fields(raw) if isinstance(raw, dict) else raw
-                        candidate = self._list_candidate(raw, city, city_code, keyword)
+                        candidate = self._list_candidate(
+                            raw, city, city_code, keyword,
+                            mode=request.mode, expect_id=expect_id,
+                        )
                         if not candidate:
                             combo_complete = False
                             hooks.on_parse_failed("BOSS 列表岗位缺少有效链接")
@@ -659,14 +667,8 @@ class BossCollector:
                                     self.platform, "completed_with_shortage", "salary_decode_failed",
                                     "BOSS 薪资字体暂时无法解析，已停止；未将岗位判为薪资不匹配",
                                 )
-                            # Never keep a number we could not decode: an empty
-                            # salary is classified as unparsed by the prefilter.
-                            undecodable_salary.add(candidate.source_job_id)
-                            raw["salary"] = ""
-                            candidate = replace(candidate, salary="")
-                            hooks.on_event(
-                                message="BOSS 薪资字体无法解析，薪资留空并交由预筛处理"
-                            )
+                            hooks.on_parse_failed("BOSS 薪资包含未识别的字体字符，已跳过该岗位")
+                            continue
                         score, filter_reason = quick_score(raw, self.config) if self.config else (100, "")
                         if score <= 0:
                             hooks.on_event(message=f"BOSS 列表预筛：{filter_reason}", increment_filtered=True)
@@ -712,9 +714,15 @@ class BossCollector:
                             continue
                         page_failures = 0
                         merged = self._merge_detail(candidate, detail, detail_url)
-                        if (merged.source_job_id in undecodable_salary
-                                and _PRIVATE_GLYPH.search(merged.salary)):
-                            merged = replace(merged, salary="")
+                        if _PRIVATE_GLYPH.search(merged.salary):
+                            if salary_decode_action != "skip_job":
+                                hooks.on_parse_failed("BOSS 详情薪资包含未识别的字体字符")
+                                return PlatformCollectionResult(
+                                    self.platform, "completed_with_shortage", "salary_decode_failed",
+                                    "BOSS 薪资字体暂时无法解析，已停止；未将岗位判为薪资不匹配",
+                                )
+                            hooks.on_parse_failed("BOSS 详情薪资包含未识别的字体字符，已跳过该岗位")
+                            continue
                         if not merged.title or not merged.company or not merged.url or not merged.jd:
                             combo_complete = False
                             hooks.on_parse_failed(detail_failure_message(
@@ -790,7 +798,8 @@ class BossCollector:
         return False
 
     @staticmethod
-    def _list_candidate(raw: Any, city: str, city_code: str, keyword: str) -> JobCandidate | None:
+    def _list_candidate(raw: Any, city: str, city_code: str, keyword: str, *,
+                        mode: str = "", expect_id: str = "") -> JobCandidate | None:
         if not isinstance(raw, dict):
             return None
         raw = _decode_fields(raw)
@@ -815,6 +824,9 @@ class BossCollector:
             company_industry=str(raw.get("company_industry") or "").strip(),
             url=url,
             source_keyword=keyword,
+            source_mode=mode,
+            source_expect_id=expect_id if mode == "recommend" else "",
+            source_city=(city or "当前城市") if mode == "search" else "",
         )
 
     @staticmethod
@@ -843,4 +855,7 @@ class BossCollector:
             company_industry=str(detail.get("company_industry") or candidate.company_industry).strip(),
             url=detail_url,
             source_keyword=candidate.source_keyword,
+            source_mode=candidate.source_mode,
+            source_expect_id=candidate.source_expect_id,
+            source_city=candidate.source_city,
         )

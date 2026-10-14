@@ -80,7 +80,7 @@ DEFAULT_CONFIG = {
         "risk_pause_max_minutes": 10,
         # 采集请求间隔的倍率，范围 1～5。
         "collection_delay_multiplier": 1.5,
-        # 薪资字体无法解码时："stop"（终止采集）、"skip_job"（继续采集，薪资留空）。
+        # 薪资字体无法解码时："stop"（终止采集）、"skip_job"（跳过该岗位并继续采集）。
         "boss_salary_decode_failure": "skip_job",
     },
     "safety": {
@@ -94,6 +94,8 @@ DEFAULT_CONFIG = {
     "browser": {
         # 已登录 Chrome 的 CDP 调试服务地址。
         "cdp_url": "http://127.0.0.1:9222",
+        # 在现有 Chrome 中使用一个不激活的后台工作标签页执行浏览器任务。
+        "silent_background": False,
     },
     "profile": {
         # 临时测试简历文件路径；启用 AI 评分或生成招呼语时读取。

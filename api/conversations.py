@@ -61,14 +61,16 @@ def open_exchanged_conversation(db_path: Path, config: dict, platform: str,
 
 
 def delete_exchanged_conversation(db_path: Path, cdp_url: str,
-                                  platform: str, conversation_id: str) -> dict:
+                                  platform: str, conversation_id: str, *,
+                                  silent_background: bool = False) -> dict:
     if platform != "boss":
         raise JobActionError("当前仅支持 BOSS 会话", 400)
     with closing(sqlite3.connect(db_path, timeout=10)) as conn:
         conversation = ExchangeStore(conn).get_conversation(platform, conversation_id)
     if conversation is None:
         raise JobActionError("有交换会话记录不存在", 404)
-    result = delete_boss_exchange(cdp_url, conversation)
+    result = delete_boss_exchange(cdp_url, conversation,
+                                  silent_background=silent_background)
     if not result.verified:
         raise JobActionError(result.message, 409 if result.uncertain else 502)
     with closing(sqlite3.connect(db_path, timeout=10)) as conn:

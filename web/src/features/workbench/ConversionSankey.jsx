@@ -11,11 +11,11 @@ const LABELS = {
   "delivery:false": "未观察到交换",
 };
 const COLORS = {
-  "source:greeted": "#3284dc", "source:hr_initiated": "#50b7a3",
-  "source:earlier_or_unknown": "#a2aec0", "followup:true": "#8d73d7",
-  "delivery:true": "#21a67d",
-  "delivery:false": "#c4ceda",
+  "source:greeted": "#2b2d29", "source:hr_initiated": "#787c76",
+  "source:earlier_or_unknown": "#aaa9a1", "followup:true": "#626961",
+  "delivery:true": "#416d62", "delivery:false": "#a6a9a1",
 };
+const NODE_WIDTH = 12;
 
 function shanghaiDate(daysAgo = 0) {
   const date = new Date(Date.now() + 8 * 60 * 60 * 1000 - daysAgo * 86400000);
@@ -32,10 +32,29 @@ function formatGeneratedAt(value) {
 }
 
 function linkPath(link) {
-  const x1 = link.from.x + 16;
+  const x1 = link.from.x + NODE_WIDTH;
   const x2 = link.to.x;
   const mid = (x1 + x2) / 2;
   return `M ${x1} ${link.y1} C ${mid} ${link.y1}, ${mid} ${link.y2}, ${x2} ${link.y2}`;
+}
+
+function ribbonPath(link) {
+  const x1 = link.from.x + NODE_WIDTH;
+  const x2 = link.to.x;
+  const mid = (x1 + x2) / 2;
+  const fromTop = link.y1 - link.width / 2;
+  const fromBottom = link.y1 + link.width / 2;
+  const toTop = link.y2 - link.width / 2;
+  const toBottom = link.y2 + link.width / 2;
+  return `M ${x1} ${fromTop} C ${mid} ${fromTop}, ${mid} ${toTop}, ${x2} ${toTop} `
+    + `L ${x2} ${toBottom} C ${mid} ${toBottom}, ${mid} ${fromBottom}, ${x1} ${fromBottom} Z`;
+}
+
+function ribbonColor(link) {
+  if (link.delivered) return "#416d62";
+  if (link.stage === 1) return "#626961";
+  if (link.stage === 2) return "#92968e";
+  return link.source === "greeted" ? "#a5a69e" : "#c2c2b9";
 }
 
 function linkLabel(link, labels) {
@@ -72,7 +91,7 @@ export default function ConversionSankey() {
   const layout = useMemo(() => buildConversionLayout(data?.flows || []), [data]);
   const confirmedDeliveryBasis = data?.basis_version === 5;
   const labels = confirmedDeliveryBasis ? {
-    ...LABELS, "delivery:true": "简历投递成功", "delivery:false": "简历投递失败",
+    ...LABELS, "delivery:true": "简历投递成功", "delivery:false": "未确认发送",
   } : LABELS;
   const greetedContacts = (data?.flows || []).filter((flow) => flow.source === "greeted")
     .reduce((sum, flow) => sum + flow.count, 0);
@@ -134,10 +153,18 @@ export default function ConversionSankey() {
         {missingRange ? "请选择开始日期和结束日期。" : invalidRange
           ? "结束日期不能早于开始日期。" : "结束日期不能晚于今天。"}</p> : null}
       {error && <p className="conversion-message error" role="alert">{error}</p>}
-      {data && <div className="conversion-chart-meta">
-        <strong>统计时间段：{data.start_date} 至 {data.end_date}</strong>
-        <span>生成时间：{formatGeneratedAt(data.generated_at)}（北京时间）</span>
-      </div>}
+      {data && <><div className="conversion-editorial-head">
+        <div>
+          <span className="conversion-overline">CONVERSION PATH / 01</span>
+          <h3>沟通转化路径</h3>
+          <p>从沟通来源，到追问，再到附件简历的发送结果。</p>
+        </div>
+        <div className="conversion-total"><span>关联对象</span><strong>{layout.total}</strong></div>
+      </div>
+      <div className="conversion-chart-meta">
+        <strong>{data.start_date} — {data.end_date}</strong>
+        <span>生成于 {formatGeneratedAt(data.generated_at)}（北京时间）</span>
+      </div></>}
       {data ? <><div className="conversion-metrics">
         <div><span>主动投递 · 池内</span><strong>{data?.metrics?.greeted ?? "—"}</strong></div>
         <div><span>HR 联系 · 池外</span><strong>{data?.metrics?.hr_initiated ?? "—"}</strong></div>
@@ -149,31 +176,45 @@ export default function ConversionSankey() {
       </div>
       {layout.total === 0 ? <div className="conversion-message">该统计时间段内暂无招呼、追问或有交换记录。</div>
           : <div className="conversion-chart-frame" ref={chartFrameRef}>
-            <div className="conversion-chart-scroll"><svg className="conversion-chart" viewBox="0 0 1000 370"
+            <div className="conversion-chart-scroll"><svg className="conversion-chart" viewBox="0 0 1100 430"
             role="img" aria-label={`${data.start_date} 至 ${data.end_date} 的转化桑基图，共 ${layout.total} 个关联对象，已招呼 ${data.metrics.greeted} 个岗位，已追问 ${data.metrics.followups} 条会话，${confirmedDeliveryBasis ? "附件简历已发送" : "有交换"} ${data.metrics.deliveries} 条会话`}>
-            <text className="conversion-column-title" x="142" y="25">来源</text>
-            <text className="conversion-column-title" x="500" y="25">追问</text>
-            <text className="conversion-column-title" x="856" y="25">{confirmedDeliveryBasis ? "已投递" : "有交换"}</text>
-            {layout.links.map((link) => <path key={link.key} d={linkPath(link)} fill="none"
-              stroke={link.stage === 2 ? COLORS[`delivery:${link.delivered}`] : COLORS[`source:${link.source}`]}
-              strokeOpacity={hoveredLink?.link.key === link.key ? 0.82
-                : link.stage === 3 ? link.delivered ? 0.5 : 0.26 : link.stage === 1 ? 0.34 : 0.42}
-              strokeWidth={link.width} pointerEvents="none" />)}
+            <line className="conversion-rule" x1="42" x2="1058" y1="65" y2="65" />
+            <line className="conversion-rule" x1="42" x2="1058" y1="394" y2="394" />
+            <text className="conversion-column-number" x="42" y="46">01</text>
+            <text className="conversion-column-title" x="77" y="46">沟通来源</text>
+            <text className="conversion-column-number" x="414" y="46">02</text>
+            <text className="conversion-column-title" x="449" y="46">追问</text>
+            <text className="conversion-column-number" x="765" y="46">03</text>
+            <text className="conversion-column-title" x="800" y="46">{confirmedDeliveryBasis ? "简历发送" : "有交换"}</text>
+            {layout.links.map((link) => <path key={link.key} className="conversion-ribbon"
+              d={ribbonPath(link)} fill={ribbonColor(link)}
+              fillOpacity={hoveredLink ? hoveredLink.link.key === link.key ? 0.9 : 0.11
+                : link.delivered ? 0.75 : link.stage === 3 ? 0.57 : 0.65}
+              pointerEvents="none" />)}
             {[...layout.links].sort((a, b) => b.width - a.width).map((link) => <path
               key={`hit:${link.key}`} d={linkPath(link)} fill="none" stroke="transparent"
               strokeWidth={Math.max(link.width, 12)} pointerEvents="stroke"
+              tabIndex="0"
               aria-label={`${linkLabel(link, labels)}${link.stage === 3 ? "，未追问直接到达" : ""}，${link.count} 个关联对象`}
               onPointerEnter={(event) => showLinkTooltip(event, link)}
               onPointerMove={(event) => showLinkTooltip(event, link)}
-              onPointerLeave={() => setHoveredLink(null)} />)}
+              onPointerLeave={() => setHoveredLink(null)}
+              onFocus={(event) => showLinkTooltip(event, link)}
+              onBlur={() => setHoveredLink(null)} />)}
             {layout.nodes.map((node) => <g key={node.key}>
-              <rect x={node.x} y={node.y} width="16" height={node.height} rx="4" fill={COLORS[node.key]} />
+              <rect x={node.x} y={node.y} width={NODE_WIDTH} height={node.height} rx="2" fill={COLORS[node.key]} />
               <title>{`${labels[node.key]}：${node.count}`}</title>
-              <text className="conversion-node-label" x={node.column === 0 ? node.x - 10 : node.x + 26}
-                y={node.y + node.height / 2} dominantBaseline="middle"
-                textAnchor={node.column === 0 ? "end" : "start"}>{labels[node.key]} {node.count}</text>
+              <text className="conversion-node-label" x={node.column === 0 ? node.x - 13 : node.x + 25}
+                y={node.y + node.height / 2 - 4} dominantBaseline="middle"
+                textAnchor={node.column === 0 ? "end" : "start"}>{labels[node.key]}</text>
+              <text className="conversion-node-value" x={node.column === 0 ? node.x - 13 : node.x + 25}
+                y={node.y + node.height / 2 + 14} dominantBaseline="middle"
+                textAnchor={node.column === 0 ? "end" : "start"}>{node.count}</text>
             </g>)}
+            <text className="conversion-figure-caption" x="42" y="416">线宽代表关联对象数量 · 未追问的路径直接连接右侧结果</text>
+            <text className="conversion-figure-caption" x="1058" y="416" textAnchor="end">HOVER TO TRACE</text>
           </svg></div>
+          <p className="conversion-mobile-hint">左右滑动查看完整路径</p>
           {hoveredLink && <div className="conversion-link-tooltip" role="tooltip"
             style={{ left: hoveredLink.x, top: hoveredLink.y,
               transform: hoveredLink.y < 100 ? "translate(-50%, 14px)" : "translate(-50%, calc(-100% - 14px))" }}>
@@ -193,8 +234,8 @@ export default function ConversionSankey() {
             <p>主动投递 · 池内：状态为“已招呼”且更新时间在所选日期内的岗位；不表示简历已发送。</p>
             <p>HR 联系 · 池外：「有交换」中的池外会话，且入库时间在所选日期内。</p>
             <p>已追问：「仅沟通」会话已追问，且更新时间在所选日期内。</p>
-            <p>简历投递成功：「有交换」会话中已核实“对方已同意，您的附件简历已发送给对方”，且入库时间在所选日期内。</p>
-            <p>简历投递失败：未核实到附件简历发送的其余关联对象；包含尚未投递或结果未确认，并非已确认发送失败数。</p>
+            <p>简历投递成功：「有交换」会话中已核实附件简历发送回执，或收到“对方已查看了您的附件简历”回执，且入库时间在所选日期内。</p>
+            <p>未确认发送：未核实到附件简历发送的其余关联对象；包含尚未投递或结果未确认，并非已确认发送失败数。</p>
             <p>流线按关联岗位或会话去重；旧会话需重新扫描「有交换」才能核实附件简历发送。</p>
           </> : <p>{data.basis_version === 4
             ? "这张图按旧口径把「有交换」当作投递线索，不代表已确认投递。重新扫描「有交换」后，点击「生成桑基图」使用附件简历发送确认口径。"

@@ -46,6 +46,11 @@ class CliConfigTests(unittest.TestCase):
         self.assertEqual(self.resolve(), self.defaults)
         self.assertEqual(self.resolve()["collection"]["platform"], "boss")
 
+    def test_salary_decode_failure_option_remains_available_in_cli(self) -> None:
+        self.assertEqual(self.resolve()["collection"]["boss_salary_decode_failure"], "skip_job")
+        self.assertEqual(self.resolve("--boss-salary-decode-failure", "stop")
+                         ["collection"]["boss_salary_decode_failure"], "stop")
+
     def test_platform_can_be_set_from_cli_and_rejects_unavailable_config(self) -> None:
         self.assertEqual(self.resolve("--platform", "boss")["collection"]["platform"], "boss")
         self.defaults["collection"]["platform"] = "other"

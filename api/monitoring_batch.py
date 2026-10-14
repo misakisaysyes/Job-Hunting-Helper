@@ -9,6 +9,7 @@ from threading import Thread
 
 from api.filtering import delete_candidate
 from api.followups import FollowupSkipped, send_followup
+from browser.browser import ChromeBrowser
 from api.jobs import JobActionError
 from config import DEFAULT_CONFIG, MONITORING_CONFIG
 from data.conversation_store import ConversationStore
@@ -75,7 +76,12 @@ class MonitoringBatchRun:
         failure = ""
         failure_notes = []
         skip_notes = []
+        shared_browser = None
         try:
+            if config["browser"].get("silent_background", False):
+                shared_browser = ChromeBrowser(config["browser"]["cdp_url"],
+                                               silent_background=True)
+            shared_browser_options = {"browser": shared_browser} if shared_browser is not None else {}
             for item in items:
                 if self.get(run_id)["status"] != "running":
                     return
@@ -93,12 +99,16 @@ class MonitoringBatchRun:
                             send_followup(self.db_path, config["browser"]["cdp_url"], "boss", item["conversation_id"],
                                 text=item["text"], anchor_id=item["anchor_id"], expected_text=item["expected_text"],
                                 max_count=config["monitoring"]["followup_max_count"],
-                                valid_days=config["monitoring"]["followup_valid_days"])
+                                valid_days=config["monitoring"]["followup_valid_days"],
+                                silent_background=config["browser"].get("silent_background", False),
+                                **shared_browser_options)
                             counts["completed"] += 1
                     else:
                         delete_candidate(self.db_path, config["browser"]["cdp_url"], "boss", item["conversation_id"],
                             config["profile"]["blocked_companies"],
-                            confirm_still_present=item.get("confirm_still_present") is True)
+                            confirm_still_present=item.get("confirm_still_present") is True,
+                            silent_background=config["browser"].get("silent_background", False),
+                            **shared_browser_options)
                         counts["completed"] += 1
                 except FollowupSkipped as exc:
                     counts["skipped"] += 1
@@ -116,6 +126,12 @@ class MonitoringBatchRun:
                     break
         except Exception as exc:
             failure = str(exc)[:400] or type(exc).__name__
+        finally:
+            if shared_browser is not None:
+                try:
+                    shared_browser.close()
+                except Exception:
+                    pass
         counts["skipped"] += counts["total"] - counts["processed"]
         status = ("completed_with_shortage" if counts["completed"] else "failed") if (counts["failed"] or failure) else "completed"
         message = f"{label}完成：成功 {counts['completed']}，跳过 {counts['skipped']}，失败 {counts['failed']}。"

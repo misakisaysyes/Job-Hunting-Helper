@@ -449,7 +449,8 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                 self.action_result(lambda: filter_actions.delete_candidate(
                     db_path, DEFAULT_CONFIG["browser"]["cdp_url"], platform,
                     conversation_id, DEFAULT_CONFIG["profile"]["blocked_companies"],
-                    confirm_still_present=body.get("confirm_still_present") is True))
+                    confirm_still_present=body.get("confirm_still_present") is True,
+                    silent_background=DEFAULT_CONFIG["browser"].get("silent_background", False)))
                 return
             if (len(parts) == 7 and parts[:3] == ["", "api", "conversations"]
                     and parts[5] == "followup" and parts[6] in {"send", "save", "generate"}):
@@ -472,7 +473,8 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                     self.action_result(lambda: followup_actions.send_followup(
                         db_path, DEFAULT_CONFIG["browser"]["cdp_url"], platform, conversation_id,
                         text=body.get("text"), anchor_id=body.get("anchor_id"),
-                        expected_text=body.get("expected_text")))
+                        expected_text=body.get("expected_text"),
+                        silent_background=DEFAULT_CONFIG["browser"].get("silent_background", False)))
                 return
             if (len(parts) == 7 and parts[:3] == ["", "api", "conversations"]
                     and parts[5:] == ["monitoring", "terminate"]):
@@ -605,7 +607,8 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                         db_path, platform, conversation_id))
                 elif parts[2] == "exchanged-conversations":
                     self.action_result(lambda: conversation_actions.delete_exchanged_conversation(
-                        db_path, DEFAULT_CONFIG["browser"]["cdp_url"], platform, conversation_id))
+                        db_path, DEFAULT_CONFIG["browser"]["cdp_url"], platform, conversation_id,
+                        silent_background=DEFAULT_CONFIG["browser"].get("silent_background", False)))
                 else:
                     self.action_result(lambda: filter_actions.delete_filter_record(
                         db_path, platform, conversation_id))

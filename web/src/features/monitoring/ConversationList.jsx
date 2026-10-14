@@ -52,7 +52,7 @@ export default function ConversationList({ conversations, total, page, pageSize,
               <th>岗位 / 公司 / HR</th>
               <th>HR检阅状态</th>
               <th>追问状态</th>
-              <th>更新时间<small>入库时间 / 更新时间</small></th>
+              <th>更新时间<small>入库时间 / 最近扫描时间</small></th>
               <th>操作</th>
             </tr></thead>
             <tbody>{conversations.map((conversation) => {
@@ -80,7 +80,7 @@ export default function ConversationList({ conversations, total, page, pageSize,
                 </td>
                 <td className="date-cell">
                   <div className="time-block"><span>入库时间</span><time dateTime={conversation.first_seen_at || undefined}>{formatTime(conversation.first_seen_at)}</time></div>
-                  <div className="time-block"><span>更新时间</span><time dateTime={conversation.updated_at || undefined}>{formatTime(conversation.updated_at)}</time></div>
+                  <div className="time-block"><span>更新时间</span><time dateTime={conversation.last_scanned_at || undefined}>{formatTime(conversation.last_scanned_at)}</time></div>
                 </td>
                 <td><div className="conversation-actions">
                   <button className="text-button" type="button"

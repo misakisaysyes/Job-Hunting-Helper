@@ -15,6 +15,7 @@ export function CollectionBasics({ settings, checks, onSave }) {
       expectIds: settings.collection.encrypt_expect_id.join(", "),
       keywords: settings.collection.keywords.join(", "),
       cdpUrl: settings.browser.cdp_url,
+      silentBackground: settings.browser.silent_background,
       resumePath: settings.profile.resume_path,
       useAiScore: settings.ai.use_ai_score,
       useAiGreeting: settings.ai.use_ai_greeting,
@@ -34,7 +35,7 @@ export function CollectionBasics({ settings, checks, onSave }) {
           encrypt_expect_id: draft.mode === "recommend" ? splitValues(draft.expectIds) : [],
           keywords: draft.mode === "search" ? splitValues(draft.keywords) : [],
         },
-        browser: { cdp_url: draft.cdpUrl },
+        browser: { cdp_url: draft.cdpUrl, silent_background: draft.silentBackground },
         profile: { resume_path: draft.resumePath },
         ai: {
           use_ai_score: draft.useAiScore,
@@ -62,6 +63,11 @@ export function CollectionBasics({ settings, checks, onSave }) {
         <input value={draft.cdpUrl} onChange={(event) => update("cdpUrl", event.target.value)} />
       </label>
     </div>
+    <label className="workbench-checkbox">
+      <input type="checkbox" checked={Boolean(draft.silentBackground)}
+        onChange={(event) => update("silentBackground", event.target.checked)} />
+      静默后台运行（采集、监测和批量操作使用后台工作页）
+    </label>
     {draft.mode === "recommend" ? <label>求职期望 ID（多个用逗号分隔）
       <input value={draft.expectIds} onChange={(event) => update("expectIds", event.target.value)} />
     </label> : <label>搜索关键词（多个用逗号分隔）

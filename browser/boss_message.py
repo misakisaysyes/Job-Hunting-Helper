@@ -77,12 +77,13 @@ def _chat_matches_job(page: object, job: dict) -> bool:
     if parsed.netloc != "www.zhipin.com" or not parsed.path.startswith("/web/geek/chat"):
         return False
     chat_job_id = parse_qs(parsed.query).get("jobId", [""])[0]
-    if chat_job_id:
-        return chat_job_id == expected_id
+    if chat_job_id and chat_job_id != expected_id:
+        return False
     return bool(page.evaluate("""({company, title, jobId}) => {
         const normalize = value => String(value || '').replace(/\\s+/g, '').toLowerCase();
-        const roots = [document.querySelector('.chat-conversation'),
-            document.querySelector('.friend-content.selected')].filter(Boolean);
+        const selected = [...document.querySelectorAll('.friend-content.selected')];
+        if (selected.length !== 1) return false;
+        const roots = [document.querySelector('.chat-conversation'), selected[0]].filter(Boolean);
         const text = normalize(roots.map(node => node.innerText || node.textContent).join(' '));
         const html = roots.map(node => node.outerHTML || '').join(' ');
         return html.includes(jobId) || (!!company && text.includes(normalize(company))
@@ -91,9 +92,26 @@ def _chat_matches_job(page: object, job: dict) -> bool:
               "jobId": expected_id}))
 
 
+def _preset_greeting_visible(page: object) -> bool:
+    return bool(page.evaluate("""() => [...document.querySelectorAll(
+        '.greet-boss-pop, .greet-pop, .dialog-wrap')].some(node => {
+        const rect = node.getBoundingClientRect();
+        if (!rect.width || !rect.height) return false;
+        if (node.matches('.greet-boss-pop, .greet-pop')) return true;
+        const text = node.innerText || node.textContent || '';
+        return !node.querySelector('textarea.input-area')
+            && /预设招呼语|默认招呼语|自动招呼语|打招呼语/.test(text);
+    })"""))
+
+
 def _wait_for_chat(page: object, job: dict, previous_pages: set[object]) -> object | None:
     deadline = time.monotonic() + 12
     while time.monotonic() < deadline:
+        try:
+            if _preset_greeting_visible(page):
+                return None
+        except Exception:
+            pass
         candidates = [page, *[candidate for candidate in page.context.pages
                              if candidate not in previous_pages]]
         for candidate in candidates:
@@ -161,7 +179,8 @@ def _same_recruiter_history(page: object, recruiter_id: str, friends: list[dict]
     return SendResult(False, False, "同一招聘者会话的最近 100 条消息未找到这条招呼语", chat_url)
 
 
-def inspect_boss_greeting(job: dict, greeting: str, cdp_url: str) -> SendResult:
+def inspect_boss_greeting(job: dict, greeting: str, cdp_url: str, *,
+                          silent_background: bool = False) -> SendResult:
     """Read the matching conversation without clicking either BOSS chat or send."""
     url = urlsplit(str(job.get("url") or ""))
     job_id = str(job.get("source_job_id") or "")
@@ -170,7 +189,7 @@ def inspect_boss_greeting(job: dict, greeting: str, cdp_url: str) -> SendResult:
         return SendResult(False, True, "岗位缺少有效的 BOSS 详情地址，无法核对会话")
     browser = None
     try:
-        browser = ChromeBrowser(cdp_url)
+        browser = ChromeBrowser(cdp_url, silent_background=silent_background)
         tab = browser.new_tab(urlunsplit(url), background=True)
         if not tab:
             return SendResult(False, True, "无法打开 BOSS 岗位详情页核对会话")
@@ -238,7 +257,8 @@ def inspect_boss_greeting(job: dict, greeting: str, cdp_url: str) -> SendResult:
             browser.close()
 
 
-def send_boss_greeting(job: dict, greeting: str, cdp_url: str) -> SendResult:
+def send_boss_greeting(job: dict, greeting: str, cdp_url: str, *,
+                       silent_background: bool = False) -> SendResult:
     """Send once and mark success only after verifying the matching BOSS conversation."""
     url = urlsplit(str(job.get("url") or ""))
     job_id = str(job.get("source_job_id") or "")
@@ -247,11 +267,12 @@ def send_boss_greeting(job: dict, greeting: str, cdp_url: str) -> SendResult:
         return SendResult(False, False, "岗位缺少有效的 BOSS 详情地址")
     browser = None
     send_attempted = False
+    chat_entry_attempted = False
     phase = "打开岗位与会话"
     previous_pages = None
     page = None
     try:
-        browser = ChromeBrowser(cdp_url)
+        browser = ChromeBrowser(cdp_url, silent_background=silent_background)
         tab = browser.new_tab(urlunsplit(url), background=True)
         if not tab:
             return SendResult(False, False, "无法打开 BOSS 岗位详情页")
@@ -270,34 +291,46 @@ def send_boss_greeting(job: dict, greeting: str, cdp_url: str) -> SendResult:
             return SendResult(False, False, "沟通按钮指向的岗位与当前记录不一致")
         chat_url = urlunsplit(("https", "www.zhipin.com", target.path, target.query, ""))
         previous_pages = set(page.context.pages)
-        button.click(timeout=5000)
+        if silent_background:
+            request = urlsplit(button.get_attribute("data-url") or "")
+            request_job_id = parse_qs(request.query).get("jobId", [""])[0]
+            if (request.scheme or request.netloc
+                    or request.path not in {"/wapi/zpgeek/friend/add.json",
+                                            "/wapi/zpgeek/friend/continuechat.json"}
+                    or request_job_id != job_id):
+                return SendResult(False, False, "BOSS 沟通入口请求与当前岗位不匹配；尚未发起沟通")
+            # The verified redirect alone does not initialise a new conversation.
+            # Run BOSS's own entry handler in the unfocused worker. A DOM click
+            # does not activate its Chrome tab; block window.open as well.
+            page.evaluate("() => { window.open = () => null; }")
+            chat_entry_attempted = True
+            button.evaluate("element => element.click()")
+        else:
+            chat_entry_attempted = True
+            button.click(timeout=5000)
         time.sleep(0.7)
-        preset = page.evaluate("""() => [...document.querySelectorAll(
-            '.greet-boss-pop, .greet-pop, .dialog-wrap')].some(node => {
-            const rect = node.getBoundingClientRect();
-            if (!rect.width || !rect.height) return false;
-            if (node.matches('.greet-boss-pop, .greet-pop')) return true;
-            const text = node.innerText || node.textContent || '';
-            return !node.querySelector('textarea.input-area')
-                && /预设招呼语|默认招呼语|自动招呼语|打招呼语/.test(text);
-        })""")
+        preset = _preset_greeting_visible(page)
         if preset:
             check_job = {**job, "greeting_send_note": "BOSS 显示预设招呼语弹窗",
                          "updated_at": datetime.now(timezone.utc).isoformat()}
-            inspection = inspect_boss_greeting(check_job, greeting, cdp_url)
+            inspection = inspect_boss_greeting(check_job, greeting, cdp_url,
+                                               silent_background=silent_background)
             if inspection.verified:
                 return inspection
             return SendResult(False, True, "BOSS 显示预设招呼语弹窗；未发送自定义文本，请人工核查")
-        if not _chat_matches_job(page, job):
-            page.goto(chat_url, wait_until="domcontentloaded", timeout=15000)
         chat_page = _wait_for_chat(page, job, previous_pages)
         if chat_page is None:
-            return SendResult(False, False, "未能确认进入对应岗位的 BOSS 会话；自定义招呼语尚未提交")
+            if _preset_greeting_visible(page):
+                return SendResult(False, True,
+                                  "BOSS 显示预设招呼语弹窗；自定义招呼语尚未提交，请人工核查")
+            return SendResult(False, chat_entry_attempted,
+                              "未能确认进入对应岗位的 BOSS 会话；自定义招呼语尚未提交，请人工核查")
         input_box = chat_page.locator(CHAT_INPUT)
         try:
             input_box.first.wait_for(state="visible", timeout=8000)
         except BrowserTimeout:
-            return SendResult(False, False, "对应会话的输入框在 8 秒内未出现；自定义招呼语尚未提交")
+            return SendResult(False, chat_entry_attempted,
+                              "对应会话的输入框在 8 秒内未出现；自定义招呼语尚未提交，请人工核查")
         existing = _delivery_state(chat_page, greeting)
         if existing == "delivered":
             return SendResult(True, False, "会话中已有相同招呼语，未重复发送", chat_url)
@@ -305,14 +338,17 @@ def send_boss_greeting(job: dict, greeting: str, cdp_url: str) -> SendResult:
             return SendResult(False, True, "会话中有相同招呼语待发送或发送失败，请人工核查")
         input_box.first.fill(greeting)
         if input_box.first.inner_text().strip() != greeting.strip():
-            return SendResult(False, False, "招呼语未正确填入输入框；自定义招呼语尚未提交")
+            return SendResult(False, chat_entry_attempted,
+                              "招呼语未正确填入输入框；自定义招呼语尚未提交，请人工核查")
         send_button = chat_page.locator(SEND_BUTTON)
         try:
             send_button.first.wait_for(state="visible", timeout=8000)
         except BrowserTimeout:
-            return SendResult(False, False, "BOSS 发送按钮在 8 秒内未变为可用；自定义招呼语尚未提交")
+            return SendResult(False, chat_entry_attempted,
+                              "BOSS 发送按钮在 8 秒内未变为可用；自定义招呼语尚未提交，请人工核查")
         if not send_button.first.is_enabled():
-            return SendResult(False, False, "BOSS 发送按钮不可用；自定义招呼语尚未提交")
+            return SendResult(False, chat_entry_attempted,
+                              "BOSS 发送按钮不可用；自定义招呼语尚未提交，请人工核查")
         send_attempted = True
         phase = "点击发送按钮"
         send_button.first.click(timeout=5000)
@@ -322,7 +358,7 @@ def send_boss_greeting(job: dict, greeting: str, cdp_url: str) -> SendResult:
             return SendResult(True, False, delivery.message, chat_url)
         return delivery
     except Exception as exc:
-        return SendResult(False, send_attempted,
+        return SendResult(False, send_attempted or chat_entry_attempted,
                           f"BOSS 发送过程出错（{phase}）：{type(exc).__name__}")
     finally:
         if browser is not None:

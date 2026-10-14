@@ -84,6 +84,22 @@ class WorkbenchSettingsTests(unittest.TestCase):
         self.assertFalse(DEFAULT_CONFIG["ai"]["use_ai_score"])
         self.assertTrue(DEFAULT_CONFIG["ai"]["use_ai_greeting"])
 
+    def test_silent_background_is_opt_in_and_persists(self):
+        self.assertFalse(DEFAULT_CONFIG["browser"]["silent_background"])
+        with self.assertRaises(SettingsError):
+            save_full_settings({"browser": {"silent_background": "true"}})
+        result = save_full_settings({"browser": {"silent_background": True}})
+        self.assertTrue(result["settings"]["browser"]["silent_background"])
+        self.assertTrue(result["pending_apply"])
+        self.assertTrue(json.loads(self.path.read_text())["browser"]["silent_background"])
+        apply_full_settings()
+        self.assertTrue(DEFAULT_CONFIG["browser"]["silent_background"])
+
+    def test_basic_settings_can_toggle_silent_background(self):
+        result = save_basic_settings({"browser": {"silent_background": True}})
+        self.assertTrue(result["settings"]["browser"]["silent_background"])
+        self.assertTrue(DEFAULT_CONFIG["browser"]["silent_background"])
+
 
 if __name__ == "__main__":
     unittest.main()
