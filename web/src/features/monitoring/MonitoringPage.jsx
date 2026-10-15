@@ -1,5 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { confirmFilterDelete, deleteConversationRecord, deleteExchangedConversation, deleteFilterRecord, generateFollowup, getCurrentMonitoring, listConversations, listExchangedConversations, listFilterCandidates, openConversation, openExchangedConversation, openFilterCandidate, sendFollowup, startMonitoring, terminateMonitoring } from "../../api/monitoring";
+import { useAlertSound } from "../../hooks/useAlertSound";
+import { claimTaskCompletion, createTaskCompletionTracker } from "../../lib/taskCompletion";
 import ConversationList from "./ConversationList";
 import ConversationDetails from "./ConversationDetails";
 import { savedFollowupText } from "./conversationDisplay";
@@ -10,13 +12,25 @@ import useMonitoringBatch from "./useMonitoringBatch";
 import { createFollowupGenerationAction } from "./followupGeneration";
 
 const PAGE_SIZE = 20;
+const MONITORING_TABS = [
+  ["communicated", "仅沟通"],
+  ["exchanged", "有交换"],
+  ["new_greetings", "新会话"],
+];
 
 function hasRunningMonitoring(state) {
   return state.status === "running" || Object.values(state.batches || {}).some((batch) => batch?.status === "running");
 }
 
+function selectedCountLabel(label, value, selected, count) {
+  return value === selected && typeof count === "number" ? `${label}（${count}）` : label;
+}
+
 export default function MonitoringPage() {
+  const { playConfirmationAlert } = useAlertSound();
+  const monitoringCompletion = useRef(createTaskCompletionTracker());
   const [monitoring, setMonitoring] = useState({ status: "idle", message: "", counts: {} });
+  const [activePhase, setActivePhase] = useState("communicated");
   const [statusReady, setStatusReady] = useState(false);
   const [starting, setStarting] = useState("");
   const [taskError, setTaskError] = useState("");
@@ -74,6 +88,15 @@ export default function MonitoringPage() {
   const conversationCount = listError ? "—" : conversationResultKey === conversationKey ? total : "…";
   const exchangeCount = exchangeError ? "—" : exchangeResultKey === exchangeKey ? exchangeTotal : "…";
   const filterCount = filterError ? "—" : filterResultKey === filterKey ? filterTotal : "…";
+
+  function updateMonitoring(state, merge = false) {
+    if (monitoringCompletion.current.observe(state)) {
+      void claimTaskCompletion(`monitoring:${state.run_id}`).then((claimed) => {
+        if (claimed) playConfirmationAlert();
+      });
+    }
+    setMonitoring((previous) => merge ? { ...previous, ...state } : state);
+  }
 
   function updateBatchTask(action, state) {
     setMonitoring((previous) => ({ ...previous, batches: { ...previous.batches, [action]: state } }));
@@ -185,7 +208,13 @@ export default function MonitoringPage() {
   useEffect(() => {
     let active = true;
     getCurrentMonitoring()
-      .then((state) => { if (active) { setMonitoring(state); setTaskError(""); } })
+      .then((state) => { if (active) {
+        updateMonitoring(state);
+        setTaskError("");
+        if (state.status === "running" && MONITORING_TABS.some(([key]) => key === state.phase)) {
+          setActivePhase(state.phase);
+        }
+      } })
       .catch((cause) => { if (active) setTaskError(cause.message || "无法读取监测状态"); })
       .finally(() => { if (active) setStatusReady(true); });
     return () => { active = false; };
@@ -319,7 +348,7 @@ export default function MonitoringPage() {
       try {
         const state = await getCurrentMonitoring();
         if (!active) return;
-        setMonitoring(state);
+        updateMonitoring(state);
         setTaskError("");
         if (!hasRunningMonitoring(state)) {
           if (["all", "communicated"].includes(state.phase)) setPage(0);
@@ -338,11 +367,12 @@ export default function MonitoringPage() {
   }, [monitoringBusy]);
 
   async function start(phase) {
+    setActivePhase(phase);
     setStarting(phase);
     setTaskError("");
     try {
       const state = await startMonitoring(phase);
-      setMonitoring((previous) => ({ ...previous, ...state }));
+      updateMonitoring(state, true);
       if (state.status !== "running") {
         if (phase === "communicated") setPage(0);
         if (phase === "new_greetings") setFilterPage(0);
@@ -518,16 +548,29 @@ export default function MonitoringPage() {
     <main className="content monitoring-page">
       <div className="heading">
         <div>
-          <p className="eyebrow">WORKBENCH</p>
           <h1>监测任务</h1>
-          <p className="subtitle">分别启动「仅沟通」「有交换」与「新招呼」扫描，查看对应会话和过滤结果。</p>
+          <p className="subtitle">选择左侧任务，启动扫描并查看对应会话和过滤结果。</p>
         </div>
       </div>
 
-      <MonitoringStatus monitoring={monitoring} onStart={start} starting={starting}
-        statusReady={statusReady} monitoringBusy={monitoringBusy} />
-      {taskError && <div className="error" role="alert">{taskError}</div>}
+      <div className="monitoring-workspace">
+        <nav className="monitoring-workspace-nav" aria-label="选择监测任务">
+          {MONITORING_TABS.map(([key, label]) => <button key={key} type="button"
+            className={activePhase === key ? "active" : ""}
+            aria-pressed={activePhase === key} onClick={() => {
+              if (key !== "communicated" && conversationBatch.preview) conversationBatch.setPreview(null);
+              setActivePhase(key);
+            }}>{label}</button>)}
+        </nav>
+        <div className="monitoring-workspace-content">
+          <MonitoringStatus monitoring={monitoring} activePhase={activePhase}
+            onStart={start} starting={starting} statusReady={statusReady} monitoringBusy={monitoringBusy} />
+          {taskError && <div className="error" role="alert">{taskError}</div>}
+        </div>
+      </div>
 
+      <section className="monitoring-list-panel" aria-label="监测会话列表">
+          <div className="monitoring-workspace-pane" hidden={activePhase !== "communicated"}>
       <div className="section-heading monitoring-section-heading">
         <div><h2>「仅沟通」会话列表</h2>
           <p>查看「仅沟通」中未读或已读未回会话的追问进展、入库和更新时间。</p></div>
@@ -537,26 +580,24 @@ export default function MonitoringPage() {
           disabled={Boolean(conversationBatch.busy)}
           value={conversationSearch} onChange={(event) => { setPage(0); setConversationSearch(event.target.value); }} />
         <div className="monitoring-select">
-          <select aria-label="筛选HR检阅状态" aria-describedby="conversation-review-count"
+          <select aria-label="筛选HR检阅状态"
             value={conversationStatus} disabled={Boolean(conversationBatch.busy)}
             onChange={(event) => { setPage(0); setConversationStatus(event.target.value); }}>
-            <option value="">全部HR检阅状态</option>
-            <option value="unread">未读</option>
-            <option value="read_no_reply">已读未回</option>
+            <option value="">{selectedCountLabel("全部HR检阅状态", "", conversationStatus, conversationCount)}</option>
+            <option value="unread">{selectedCountLabel("未读", "unread", conversationStatus, conversationCount)}</option>
+            <option value="read_no_reply">{selectedCountLabel("已读未回", "read_no_reply", conversationStatus, conversationCount)}</option>
           </select>
-          <span id="conversation-review-count" className="monitoring-select-count">{conversationCount} 条</span>
         </div>
         <div className="monitoring-select">
-          <select aria-label="筛选追问状态" aria-describedby="conversation-followup-count"
+          <select aria-label="筛选追问状态"
             value={followupStatus} disabled={Boolean(conversationBatch.busy)}
             onChange={(event) => { setPage(0); setFollowupStatus(event.target.value); }}>
-            <option value="">全部追问状态</option>
-            <option value="available">可追问</option>
-            <option value="unavailable">不可追问</option>
-            <option value="sending">发送中</option>
-            <option value="incomplete">追问未完成</option>
+            <option value="">{selectedCountLabel("全部追问状态", "", followupStatus, conversationCount)}</option>
+            <option value="available">{selectedCountLabel("可追问", "available", followupStatus, conversationCount)}</option>
+            <option value="unavailable">{selectedCountLabel("不可追问", "unavailable", followupStatus, conversationCount)}</option>
+            <option value="sending">{selectedCountLabel("发送中", "sending", followupStatus, conversationCount)}</option>
+            <option value="incomplete">{selectedCountLabel("追问未完成", "incomplete", followupStatus, conversationCount)}</option>
           </select>
-          <span id="conversation-followup-count" className="monitoring-select-count">{conversationCount} 条</span>
         </div>
       </div>
       {listError && <div className="error" role="alert">{listError}</div>}
@@ -603,6 +644,8 @@ export default function MonitoringPage() {
           </div>
         </section>
       </div>}
+          </div>
+          <div className="monitoring-workspace-pane" hidden={activePhase !== "exchanged"}>
       <div className="section-heading monitoring-section-heading">
         <div><h2>「有交换」会话列表</h2>
           <p>从 BOSS「更多 → 有交换」读取会话；池外岗位保持池外，不会自动入池。</p></div>
@@ -612,14 +655,13 @@ export default function MonitoringPage() {
           disabled={Boolean(exchangeBatch.busy)}
           value={exchangeSearch} onChange={(event) => { setExchangePage(0); setExchangeSearch(event.target.value); }} />
         <div className="monitoring-select">
-          <select aria-label="筛选有交换岗位池状态" aria-describedby="exchange-pool-count"
+          <select aria-label="筛选有交换岗位池状态"
             value={exchangePoolStatus} disabled={Boolean(exchangeBatch.busy)}
             onChange={(event) => { setExchangePage(0); setExchangePoolStatus(event.target.value); }}>
-            <option value="">全部岗位</option>
-            <option value="inside">池内</option>
-            <option value="outside">池外</option>
+            <option value="">{selectedCountLabel("全部岗位", "", exchangePoolStatus, exchangeCount)}</option>
+            <option value="inside">{selectedCountLabel("池内", "inside", exchangePoolStatus, exchangeCount)}</option>
+            <option value="outside">{selectedCountLabel("池外", "outside", exchangePoolStatus, exchangeCount)}</option>
           </select>
-          <span id="exchange-pool-count" className="monitoring-select-count">{exchangeCount} 条</span>
         </div>
       </div>
       {exchangeError && <div className="error" role="alert">{exchangeError}</div>}
@@ -637,6 +679,8 @@ export default function MonitoringPage() {
           if (enabled) { conversationBatch.close(); filterBatch.close(); exchangeBatch.setBatchMode(true); }
           else exchangeBatch.close();
         }} />
+          </div>
+          <div className="monitoring-workspace-pane" hidden={activePhase !== "new_greetings"}>
       <div className="section-heading monitoring-section-heading">
         <div><h2>「新招呼」会话列表</h2>
           <p>仅展示「新招呼」中命中公司排除词的会话；确认删除后会先打开目标会话，再从菜单删除。打开会话可能清除未读标记。</p></div>
@@ -646,18 +690,17 @@ export default function MonitoringPage() {
           disabled={Boolean(filterBatch.busy)}
           value={filterSearch} onChange={(event) => { setFilterPage(0); setFilterSearch(event.target.value); }} />
         <div className="monitoring-select">
-          <select aria-label="筛选过滤状态" aria-describedby="filter-candidate-count"
+          <select aria-label="筛选过滤状态"
             value={filterStatus} disabled={Boolean(filterBatch.busy)}
             onChange={(event) => { setFilterPage(0); setFilterStatus(event.target.value); }}>
-            <option value="">全部处理状态</option>
-            <option value="pending_review">待审核删除</option>
-            <option value="deleting">删除中</option>
-            <option value="deleted">已删除</option>
-            <option value="failed">删除失败</option>
-            <option value="unknown">结果不明</option>
-            <option value="stale">已失效</option>
+            <option value="">{selectedCountLabel("全部处理状态", "", filterStatus, filterCount)}</option>
+            <option value="pending_review">{selectedCountLabel("待审核删除", "pending_review", filterStatus, filterCount)}</option>
+            <option value="deleting">{selectedCountLabel("删除中", "deleting", filterStatus, filterCount)}</option>
+            <option value="deleted">{selectedCountLabel("已删除", "deleted", filterStatus, filterCount)}</option>
+            <option value="failed">{selectedCountLabel("删除失败", "failed", filterStatus, filterCount)}</option>
+            <option value="unknown">{selectedCountLabel("结果不明", "unknown", filterStatus, filterCount)}</option>
+            <option value="stale">{selectedCountLabel("已失效", "stale", filterStatus, filterCount)}</option>
           </select>
-          <span id="filter-candidate-count" className="monitoring-select-count">{filterCount} 条</span>
         </div>
       </div>
       {filterError && <div className="error" role="alert">{filterError}</div>}
@@ -675,6 +718,8 @@ export default function MonitoringPage() {
           else filterBatch.close();
         }}
         filtered={Boolean(filterQuery || filterStatus)} />
+          </div>
+      </section>
     </main>
   );
 }

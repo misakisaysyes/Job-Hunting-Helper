@@ -44,6 +44,7 @@ class AIGreetingCollectionTests(unittest.TestCase):
         resume.write_text("做过浏览器性能优化", encoding="utf-8")
         self.config["profile"]["resume_path"] = str(resume)
         self.config["ai"]["score_threshold"] = 71
+        self.config["ai"]["use_ai_greeting"] = False
 
     def run_jobs(self, jobs, model_call, on_record=None):
         class Runner:
@@ -203,6 +204,54 @@ class AIGreetingCollectionTests(unittest.TestCase):
             thread.join(timeout=5)
         self.assertFalse(thread.is_alive())
         self.assertEqual(self.stored_jobs()["one"]["greeting"], "您好，想了解岗位。")
+
+    def test_stop_during_greeting_keeps_scored_job_without_waiting(self) -> None:
+        self.config["ai"]["use_ai_greeting"] = True
+        started, release, stop = threading.Event(), threading.Event(), threading.Event()
+
+        def model(system, user):
+            if "岗位匹配评估员" in system:
+                return '{"score": 88, "reason": "匹配"}'
+            started.set()
+            release.wait(5)
+            return "您好，想了解岗位。"
+
+        class Runner:
+            def run(self, request, *, on_job, on_prefilter_pass, on_event,
+                    max_jobs, stop_event):
+                on_prefilter_pass(_job("one"))
+                return PlatformCollectionResult("boss", "completed", counts={"new": 1})
+
+        results, errors = [], []
+        scheduler = AITaskScheduler(self.config, model_call=model)
+
+        def run_pipeline():
+            try:
+                with patch("run.ChromeBrowser"), patch("run.CollectionOrchestrator", return_value=Runner()):
+                    results.append(run_collection(self.config, on_record=lambda _: None,
+                        ai_scheduler=scheduler, stop_event=stop))
+            except Exception as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=run_pipeline)
+        thread.start()
+        try:
+            self.assertTrue(started.wait(2))
+            stop.set()
+            thread.join(timeout=2)
+            stopped_without_waiting = not thread.is_alive()
+        finally:
+            release.set()
+            thread.join(timeout=5)
+            scheduler.shutdown()
+
+        self.assertTrue(stopped_without_waiting)
+        self.assertEqual(errors, [])
+        self.assertEqual(results[0].status, "stopped")
+        job = self.stored_jobs()["one"]
+        self.assertEqual(job["ai_score"], 88)
+        self.assertEqual(job["ai_greeting_status"], "failed")
+        self.assertEqual(job["ai_greeting_error"], "采集已中断，招呼语未生成")
 
     def test_cli_can_enable_greetings_independently_of_scoring(self) -> None:
         parser = build_parser()

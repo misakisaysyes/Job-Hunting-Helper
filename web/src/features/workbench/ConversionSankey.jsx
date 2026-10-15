@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { generateConversionFlow, getSavedConversionFlow } from "../../api/tasks";
+import { generateConversionFlow, getSavedConversionFlow, refreshConversionCharts } from "../../api/tasks";
+import { getCurrentMonitoring } from "../../api/monitoring";
+import { useAlertSound } from "../../hooks/useAlertSound";
+import { claimTaskCompletion, createTaskCompletionTracker } from "../../lib/taskCompletion";
 import { buildConversionLayout } from "./conversionLayout";
+import ConversionTrend from "./ConversionTrend";
 
 const LABELS = {
   "source:greeted": "主动投递 · 池内",
@@ -11,11 +15,20 @@ const LABELS = {
   "delivery:false": "未观察到交换",
 };
 const COLORS = {
-  "source:greeted": "#2b2d29", "source:hr_initiated": "#787c76",
-  "source:earlier_or_unknown": "#aaa9a1", "followup:true": "#626961",
-  "delivery:true": "#416d62", "delivery:false": "#a6a9a1",
+  "source:greeted": "#1978e6", "source:hr_initiated": "#6398d2",
+  "source:earlier_or_unknown": "#9eacbb", "followup:true": "#438dcf",
+  "delivery:true": "#168457", "delivery:false": "#a7b4c2",
 };
 const NODE_WIDTH = 12;
+const RESCAN_STORAGE_KEY = "jhh-conversion-rescan-before-generate";
+
+function savedRescanPreference() {
+  try {
+    return window.localStorage.getItem(RESCAN_STORAGE_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
 
 function shanghaiDate(daysAgo = 0) {
   const date = new Date(Date.now() + 8 * 60 * 60 * 1000 - daysAgo * 86400000);
@@ -51,10 +64,10 @@ function ribbonPath(link) {
 }
 
 function ribbonColor(link) {
-  if (link.delivered) return "#416d62";
-  if (link.stage === 1) return "#626961";
-  if (link.stage === 2) return "#92968e";
-  return link.source === "greeted" ? "#a5a69e" : "#c2c2b9";
+  if (link.delivered) return "#168457";
+  if (link.stage === 1) return "#438dcf";
+  if (link.stage === 2) return "#88acd1";
+  return link.source === "greeted" ? "#a6bad0" : "#bfccd9";
 }
 
 function linkLabel(link, labels) {
@@ -62,12 +75,18 @@ function linkLabel(link, labels) {
 }
 
 export default function ConversionSankey() {
+  const { playConfirmationAlert } = useAlertSound();
+  const completionTracker = useRef(createTaskCompletionTracker());
   const [start, setStart] = useState(() => shanghaiDate(29));
   const [end, setEnd] = useState(() => shanghaiDate());
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [refreshRunId, setRefreshRunId] = useState(null);
+  const [progress, setProgress] = useState("");
   const [restoring, setRestoring] = useState(true);
+  const [rescanBeforeGenerate, setRescanBeforeGenerate] = useState(savedRescanPreference);
+  const [chartType, setChartType] = useState("sankey");
   const [hoveredLink, setHoveredLink] = useState(null);
   const [basisExpanded, setBasisExpanded] = useState(false);
   const chartFrameRef = useRef(null);
@@ -75,18 +94,89 @@ export default function ConversionSankey() {
 
   useEffect(() => {
     let active = true;
-    getSavedConversionFlow().then(({ snapshot }) => {
-      if (!active || !snapshot) return;
-      setData(snapshot);
-      setStart(snapshot.start_date);
-      setEnd(snapshot.end_date);
-    }).catch((cause) => {
-      if (active) setError(cause.message || "恢复上次生成的桑基图失败");
-    }).finally(() => {
-      if (active) setRestoring(false);
-    });
+    async function restore() {
+      try {
+        const { snapshot } = await getSavedConversionFlow();
+        if (active && snapshot) {
+          setData(snapshot);
+          setStart(snapshot.start_date);
+          setEnd(snapshot.end_date);
+        }
+      } catch (cause) {
+        if (active) setError(cause.message || "恢复上次生成的图表失败");
+      } finally {
+        if (active) setRestoring(false);
+      }
+      try {
+        const state = await getCurrentMonitoring();
+        if (!active || state.phase !== "conversion") return;
+        if (state.status === "running") {
+          completionTracker.current.observe(state);
+          setStart(state.counts.chart_start);
+          setEnd(state.counts.chart_end);
+          setProgress(state.message);
+          setLoading(true);
+          setRefreshRunId(state.run_id);
+        } else if (state.status === "completed") {
+          const { snapshot } = await getSavedConversionFlow();
+          if (active && snapshot) {
+            setData(snapshot);
+            setStart(snapshot.start_date);
+            setEnd(snapshot.end_date);
+          }
+        }
+      } catch (cause) {
+        if (active) setError(cause.message || "读取图表刷新状态失败");
+      }
+    }
+    void restore();
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (refreshRunId == null) return;
+    let active = true;
+    let timer;
+    async function poll() {
+      try {
+        const state = await getCurrentMonitoring();
+        if (!active) return;
+        if (state.run_id !== refreshRunId || state.phase !== "conversion") {
+          throw new Error("图表刷新任务已中断，请检查监测任务记录");
+        }
+        if (completionTracker.current.observe(state)
+            && await claimTaskCompletion(`monitoring:${state.run_id}`)) playConfirmationAlert();
+        if (state.status === "running") {
+          setProgress(state.message);
+          timer = window.setTimeout(poll, 2000);
+          return;
+        }
+        if (state.status !== "completed") {
+          throw new Error(`监测或图表生成失败：${state.message || state.status}`);
+        }
+        const { snapshot } = await getSavedConversionFlow();
+        if (!active) return;
+        if (!snapshot || !Array.isArray(snapshot.daily_metrics)
+            || snapshot.start_date !== state.counts.chart_start
+            || snapshot.end_date !== state.counts.chart_end) {
+          throw new Error("监测已完成，但图表数据未更新，请检查任务记录");
+        }
+        setData(snapshot);
+        setStart(snapshot.start_date);
+        setEnd(snapshot.end_date);
+        setError("");
+      } catch (cause) {
+        if (active) setError(cause.message || "刷新图表失败");
+      }
+      if (active) {
+        setLoading(false);
+        setProgress("");
+        setRefreshRunId(null);
+      }
+    }
+    void poll();
+    return () => { active = false; window.clearTimeout(timer); };
+  }, [refreshRunId]);
 
   const layout = useMemo(() => buildConversionLayout(data?.flows || []), [data]);
   const confirmedDeliveryBasis = data?.basis_version === 5;
@@ -115,19 +205,39 @@ export default function ConversionSankey() {
       y: clientY - frameRect.top });
   }
 
-  async function generate() {
+  async function refresh() {
     if (loading || restoring || missingRange || invalidRange || futureRange) return;
-    const requestedStart = start;
-    const requestedEnd = end;
     setHoveredLink(null);
     setLoading(true);
+    setProgress(rescanBeforeGenerate
+      ? "正在启动「仅沟通」与「有交换」监测…" : "正在根据已有数据生成图表…");
     setError("");
     try {
-      setData(await generateConversionFlow(requestedStart, requestedEnd));
+      if (!rescanBeforeGenerate) {
+        const snapshot = await generateConversionFlow(start, end);
+        setData(snapshot);
+        setLoading(false);
+        setProgress("");
+        return;
+      }
+      const state = await refreshConversionCharts(start, end);
+      completionTracker.current.observe(state);
+      setProgress(state.message);
+      setRefreshRunId(state.run_id);
     } catch (cause) {
-      setError(cause.message || "生成桑基图失败");
-    } finally {
+      setError(cause.message || "生成图表失败");
       setLoading(false);
+      setProgress("");
+    }
+  }
+
+  function updateRescanPreference(event) {
+    const enabled = event.target.checked;
+    setRescanBeforeGenerate(enabled);
+    try {
+      window.localStorage.setItem(RESCAN_STORAGE_KEY, String(enabled));
+    } catch {
+      // The switch still works for this page when browser storage is unavailable.
     }
   }
 
@@ -135,16 +245,22 @@ export default function ConversionSankey() {
     <div className="workbench-history-heading">
       <div className="workbench-section-heading">
         <h2 id="conversion-title">招呼到简历投递</h2>
-        <p>按上海时间统计所选日期内的岗位与会话状态，查看招呼到附件简历发送的转化路径。</p>
+        <p>按所选北京时间日期生成桑基图与折线图，可选择是否先重新扫描「仅沟通」和「有交换」。</p>
       </div>
       <div className="workbench-history-controls conversion-date-controls">
-        <label>开始日期<input type="date" value={start} max={end || today} disabled={restoring}
+        <label>开始日期<input type="date" value={start} max={end || today} disabled={restoring || loading}
           onChange={(event) => { setStart(event.target.value); setError(""); }} /></label>
-        <label>结束日期<input type="date" value={end} min={start} max={today} disabled={restoring}
+        <label>结束日期<input type="date" value={end} min={start} max={today} disabled={restoring || loading}
           onChange={(event) => { setEnd(event.target.value); setError(""); }} /></label>
-        <button type="button" className="conversion-generate-button" onClick={generate}
+        <label className="conversion-rescan-toggle" title="开启后先扫描「仅沟通」和「有交换」，关闭后直接使用已有数据">
+          <span>生成前重新扫描</span>
+          <input type="checkbox" role="switch" checked={rescanBeforeGenerate}
+            disabled={restoring || loading} onChange={updateRescanPreference} />
+        </label>
+        <button type="button" className="conversion-generate-button" onClick={refresh}
           disabled={loading || restoring || missingRange || invalidRange || futureRange}>
-          {loading ? "生成中…" : "生成桑基图"}
+          {loading ? rescanBeforeGenerate ? "扫描生成中…" : "生成中…"
+            : rescanBeforeGenerate ? "扫描并生成图表" : "生成图表"}
         </button>
       </div>
     </div>
@@ -153,18 +269,27 @@ export default function ConversionSankey() {
         {missingRange ? "请选择开始日期和结束日期。" : invalidRange
           ? "结束日期不能早于开始日期。" : "结束日期不能晚于今天。"}</p> : null}
       {error && <p className="conversion-message error" role="alert">{error}</p>}
+      {loading && <p className="conversion-message" role="status">{progress}</p>}
       {data && <><div className="conversion-editorial-head">
         <div>
-          <span className="conversion-overline">CONVERSION PATH / 01</span>
-          <h3>沟通转化路径</h3>
-          <p>从沟通来源，到追问，再到附件简历的发送结果。</p>
+          <h3>{chartType === "trend" ? "每日沟通趋势" : "沟通转化路径"}</h3>
+          <p>{chartType === "trend" ? "按日期查看四类沟通记录的每日数量。" : "从沟通来源，到追问，再到附件简历的发送结果。"}</p>
         </div>
-        <div className="conversion-total"><span>关联对象</span><strong>{layout.total}</strong></div>
+        <div className="conversion-total"><span>{chartType === "trend" ? "统计天数" : "沟通记录"}</span>
+          <strong>{chartType === "trend" ? data.daily_metrics?.length ?? "—" : layout.total}</strong></div>
       </div>
       <div className="conversion-chart-meta">
         <strong>{data.start_date} — {data.end_date}</strong>
         <span>生成于 {formatGeneratedAt(data.generated_at)}（北京时间）</span>
       </div></>}
+      <div className="conversion-view-tabs" role="group" aria-label="选择图表类型">
+        <button type="button" className={chartType === "sankey" ? "active" : ""}
+          aria-pressed={chartType === "sankey"}
+          onClick={() => { setHoveredLink(null); setChartType("sankey"); }}>桑基图</button>
+        <button type="button" className={chartType === "trend" ? "active" : ""}
+          aria-pressed={chartType === "trend"}
+          onClick={() => { setHoveredLink(null); setChartType("trend"); }}>折线图</button>
+      </div>
       {data ? <><div className="conversion-metrics">
         <div><span>主动投递 · 池内</span><strong>{data?.metrics?.greeted ?? "—"}</strong></div>
         <div><span>HR 联系 · 池外</span><strong>{data?.metrics?.hr_initiated ?? "—"}</strong></div>
@@ -174,10 +299,14 @@ export default function ConversionSankey() {
         <div className="conversion-rate"><span>{confirmedDeliveryBasis ? "已招呼转投递" : "已招呼转有交换"}</span>
           <strong>{greetedContacts ? `${conversion}%` : "—"}</strong></div>
       </div>
-      {layout.total === 0 ? <div className="conversion-message">该统计时间段内暂无招呼、追问或有交换记录。</div>
+      {chartType === "trend"
+        ? !Array.isArray(data.daily_metrics) || !data.daily_metrics.length
+          ? <div className="conversion-message">现有快照没有每日数据，请重新生成图表更新统计。</div>
+          : <ConversionTrend dailyMetrics={data.daily_metrics} />
+        : layout.total === 0 ? <div className="conversion-message">该统计时间段内暂无招呼、追问或有交换记录。</div>
           : <div className="conversion-chart-frame" ref={chartFrameRef}>
             <div className="conversion-chart-scroll"><svg className="conversion-chart" viewBox="0 0 1100 430"
-            role="img" aria-label={`${data.start_date} 至 ${data.end_date} 的转化桑基图，共 ${layout.total} 个关联对象，已招呼 ${data.metrics.greeted} 个岗位，已追问 ${data.metrics.followups} 条会话，${confirmedDeliveryBasis ? "附件简历已发送" : "有交换"} ${data.metrics.deliveries} 条会话`}>
+            role="img" aria-label={`${data.start_date} 至 ${data.end_date} 的转化桑基图，共 ${layout.total} 条沟通记录，已招呼 ${data.metrics.greeted} 个岗位，已追问 ${data.metrics.followups} 条会话，${confirmedDeliveryBasis ? "附件简历已发送" : "有交换"} ${data.metrics.deliveries} 条会话`}>
             <line className="conversion-rule" x1="42" x2="1058" y1="65" y2="65" />
             <line className="conversion-rule" x1="42" x2="1058" y1="394" y2="394" />
             <text className="conversion-column-number" x="42" y="46">01</text>
@@ -195,7 +324,7 @@ export default function ConversionSankey() {
               key={`hit:${link.key}`} d={linkPath(link)} fill="none" stroke="transparent"
               strokeWidth={Math.max(link.width, 12)} pointerEvents="stroke"
               tabIndex="0"
-              aria-label={`${linkLabel(link, labels)}${link.stage === 3 ? "，未追问直接到达" : ""}，${link.count} 个关联对象`}
+              aria-label={`${linkLabel(link, labels)}${link.stage === 3 ? "，未追问直接到达" : ""}，${link.count} 条沟通记录`}
               onPointerEnter={(event) => showLinkTooltip(event, link)}
               onPointerMove={(event) => showLinkTooltip(event, link)}
               onPointerLeave={() => setHoveredLink(null)}
@@ -211,7 +340,7 @@ export default function ConversionSankey() {
                 y={node.y + node.height / 2 + 14} dominantBaseline="middle"
                 textAnchor={node.column === 0 ? "end" : "start"}>{node.count}</text>
             </g>)}
-            <text className="conversion-figure-caption" x="42" y="416">线宽代表关联对象数量 · 未追问的路径直接连接右侧结果</text>
+            <text className="conversion-figure-caption" x="42" y="416">线宽代表沟通记录数（按岗位或会话去重） · 未追问则直达右侧结果</text>
             <text className="conversion-figure-caption" x="1058" y="416" textAnchor="end">HOVER TO TRACE</text>
           </svg></div>
           <p className="conversion-mobile-hint">左右滑动查看完整路径</p>
@@ -220,7 +349,7 @@ export default function ConversionSankey() {
               transform: hoveredLink.y < 100 ? "translate(-50%, 14px)" : "translate(-50%, calc(-100% - 14px))" }}>
             <div className="conversion-link-tooltip-route">{linkLabel(hoveredLink.link, labels)}</div>
             {hoveredLink.link.stage === 3 && <div className="conversion-link-tooltip-kind">未追问，直接到达</div>}
-            <div className="conversion-link-tooltip-value"><strong>{hoveredLink.link.count}</strong> 个关联对象</div>
+            <div className="conversion-link-tooltip-value"><strong>{hoveredLink.link.count}</strong> 条沟通记录</div>
             <div className="conversion-link-tooltip-share">占起点 {hoveredLink.link.from.count
               ? `${(hoveredLink.link.count / hoveredLink.link.from.count * 100).toFixed(1)}%` : "—"}</div>
           </div>}</div>}
@@ -235,14 +364,14 @@ export default function ConversionSankey() {
             <p>HR 联系 · 池外：「有交换」中的池外会话，且入库时间在所选日期内。</p>
             <p>已追问：「仅沟通」会话已追问，且更新时间在所选日期内。</p>
             <p>简历投递成功：「有交换」会话中已核实附件简历发送回执，或收到“对方已查看了您的附件简历”回执，且入库时间在所选日期内。</p>
-            <p>未确认发送：未核实到附件简历发送的其余关联对象；包含尚未投递或结果未确认，并非已确认发送失败数。</p>
-            <p>流线按关联岗位或会话去重；旧会话需重新扫描「有交换」才能核实附件简历发送。</p>
+            <p>未确认发送：未核实到附件简历发送的其余沟通记录；包含尚未投递或结果未确认，并非已确认发送失败数。</p>
+            <p>沟通记录按岗位或会话去重；旧会话需重新扫描「有交换」才能核实附件简历发送。</p>
           </> : <p>{data.basis_version === 4
-            ? "这张图按旧口径把「有交换」当作投递线索，不代表已确认投递。重新扫描「有交换」后，点击「生成桑基图」使用附件简历发送确认口径。"
-            : "这张图按旧统计口径生成。点击「生成桑基图」后，将按当前岗位与会话状态重新统计。"}</p>}
+            ? "这张图按旧口径把「有交换」当作投递线索，不代表已确认投递。重新扫描「有交换」后，重新生成图表即可使用附件简历发送确认口径。"
+            : "这张图按旧统计口径生成。重新生成图表后，将按当前岗位与会话状态统计。"}</p>}
         </div>
       </div></>
-        : <p className="conversion-message">{restoring ? "正在恢复上次生成的桑基图…" : "选择日期后，点击“生成桑基图”查看该时间段的转化情况。"}</p>}
+        : <p className="conversion-message">{restoring ? "正在恢复上次生成的图表…" : "选择日期后生成图表，查看该时间段的统计。"}</p>}
     </div>
   </section>;
 }

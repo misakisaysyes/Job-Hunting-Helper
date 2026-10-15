@@ -323,12 +323,16 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                         if restart_event.is_set():
                             self.send_json(503, {"error": "服务正在重启，请稍后重试"})
                             return
-                        saved = read_full_settings()["settings"]
+                        saved_state = read_full_settings()
+                        saved = saved_state["settings"]
                         restarting = requires_service_restart(
                             saved, started_ai_concurrency, db_path,
                             state_db_overridden=state_db_overridden)
-                        if restarting and task_runs.active_task_type():
-                            self.send_json(409, {"error": "采集或监测任务正在运行，请任务结束后再生效需要重启的配置"})
+                        if (saved_state["pending_apply"] or restarting) and task_runs.active_task_type():
+                            self.send_json(409, {
+                                "code": "active_task_blocks_settings_apply",
+                                "error": "当前有任务在执行，配置无法生效，但已保存，待任务执行完后重试",
+                            })
                             return
                         result = apply_full_settings()
                         if restarting:
@@ -350,6 +354,32 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                 return
             if restart_event.is_set():
                 self.send_json(503, {"error": "服务正在重启，请稍后重试"})
+                return
+            if path == "/api/workbench/conversion/refresh":
+                body = self.read_json()
+                if body is None:
+                    return
+                start_date, end_date = body.get("start"), body.get("end")
+                try:
+                    conversion_actions.validate_conversion_range(start_date, end_date)
+                    with lifecycle_lock:
+                        if restart_event.is_set():
+                            self.send_json(503, {"error": "服务正在重启，请稍后重试"})
+                            return
+                        state = monitoring.start("conversion", chart_range=(start_date, end_date))
+                except job_actions.JobActionError as exc:
+                    self.send_json(exc.status_code, {"error": str(exc)})
+                    return
+                except TaskAlreadyRunning as exc:
+                    self.send_json(409, {"error": str(exc)})
+                    return
+                except ValueError as exc:
+                    self.send_json(400, {"error": str(exc)})
+                    return
+                if state is None:
+                    self.send_json(409, {"error": "已有监测任务正在运行，请等待任务完成后再启动"})
+                    return
+                self.send_json(202, state)
                 return
             if path == "/api/workbench/conversion":
                 body = self.read_json()
@@ -396,6 +426,15 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                     return
                 if state is None:
                     self.send_json(409, {"error": "已有采集任务正在运行，请等待任务完成后再启动"})
+                    return
+                self.send_json(202, state)
+                return
+            if path == "/api/collections/stop":
+                if self.read_json() is None:
+                    return
+                state = collection.stop()
+                if state is None:
+                    self.send_json(409, {"error": "当前没有正在运行的采集任务"})
                     return
                 self.send_json(202, state)
                 return

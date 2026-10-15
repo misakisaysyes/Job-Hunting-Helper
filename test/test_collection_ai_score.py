@@ -17,6 +17,7 @@ import httpx
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from ai import AITaskScheduler
 from collector.models import JobCandidate, PlatformCollectionResult
 from collector.orchestrator import CollectionOrchestrator
 from collector.platforms.boss import JS_DETECT_COLLECTION_RISK, JS_EXTRACT_DETAIL
@@ -171,6 +172,61 @@ class AIScoreCollectionTests(unittest.TestCase):
         self.assertIsNone(record["ai_score"])
         self.assertIn("HTTP 503", record["ai_score_error"])
         self.assertEqual(result.counts["ai_score_failed"], 1)
+
+    def test_stop_keeps_pending_job_without_waiting_for_model(self) -> None:
+        self.config["ai"].update(use_ai_score=True, ai_api_concurrency=1)
+        started, release, stop = threading.Event(), threading.Event(), threading.Event()
+
+        def model(system, user):
+            started.set()
+            release.wait(5)
+            return '{"score": 88, "reason": "匹配"}'
+
+        class Runner:
+            def run(self, request, *, on_job, on_prefilter_pass, on_event,
+                    max_jobs, stop_event):
+                on_prefilter_pass(_job("pending"))
+                self_outer.assertTrue(started.wait(2))
+                self_outer.assertIs(stop_event, stop)
+                self_outer.assertTrue(stop_event.wait(2))
+                return PlatformCollectionResult("boss", "stopped", "user_stopped",
+                                                "用户已停止", counts={"new": 1})
+
+        self_outer = self
+        with TemporaryDirectory() as directory:
+            resume = Path(directory) / "resume.md"
+            resume.write_text("做过浏览器性能优化", encoding="utf-8")
+            self.config["profile"]["resume_path"] = str(resume)
+            records, results, errors = [], [], []
+            scheduler = AITaskScheduler(self.config, model_call=model)
+
+            def run_pipeline():
+                try:
+                    with patch("run.open_safety_db"), patch("run.ChromeBrowser"), \
+                            patch("run.CollectionOrchestrator", return_value=Runner()):
+                        results.append(run_collection(self.config, on_record=records.append,
+                            ai_scheduler=scheduler, stop_event=stop))
+                except Exception as exc:
+                    errors.append(exc)
+
+            thread = threading.Thread(target=run_pipeline)
+            thread.start()
+            try:
+                self.assertTrue(started.wait(2))
+                stop.set()
+                thread.join(timeout=2)
+                stopped_without_waiting = not thread.is_alive()
+            finally:
+                release.set()
+                thread.join(timeout=5)
+                scheduler.shutdown()
+
+        self.assertTrue(stopped_without_waiting)
+        self.assertEqual(errors, [])
+        self.assertEqual(results[0].status, "stopped")
+        self.assertEqual(records[0]["ai_score_status"], "score_failed")
+        self.assertEqual(records[0]["ai_score_error"], "采集已中断，评分未完成")
+        self.assertEqual(results[0].counts["ai_score_failed"], 1)
 
     def test_boss_submits_only_complete_jobs_that_pass_detail_prefilter(self) -> None:
         self.config["ai"]["use_ai_score"] = True

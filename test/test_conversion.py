@@ -1,13 +1,13 @@
 """Workbench conversion counts preserve dated events and joined contact paths."""
 
 from contextlib import closing
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
 from threading import Event
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from api.conversion import (generate_and_save_conversion_flow, get_conversion_flow,
                             get_saved_conversion_flow)
@@ -80,6 +80,42 @@ class ConversionTests(unittest.TestCase):
                            ("2999-01-01", "2999-01-02"), (self.today, "2000-01-01")):
             with self.subTest(start=start, end=end), self.assertRaises(JobActionError):
                 get_conversion_flow(self.path, start, end)
+
+    def test_daily_metrics_use_shanghai_dates_and_include_empty_days(self):
+        today = date.fromisoformat(self.today)
+        first_day = (today - timedelta(days=2)).isoformat()
+        middle_day = (today - timedelta(days=1)).isoformat()
+        first_at = datetime.fromisoformat(f"{first_day}T23:30:00+08:00").astimezone(timezone.utc).isoformat()
+        last_at = datetime.fromisoformat(f"{self.today}T00:30:00+08:00").astimezone(timezone.utc).isoformat()
+        with closing(sqlite3.connect(self.path)) as conn:
+            JobStore(conn)
+            ConversationStore(conn)
+            ExchangeStore(conn)
+            self.insert_job(conn, "job-1", "greeted", first_at)
+            conn.execute("""INSERT INTO monitored_conversations
+                (platform, conversation_id, judgment, followup_count, first_seen_at,
+                 updated_at, last_scanned_at)
+                VALUES ('boss', 'outside', 'unread', 1, ?, ?, ?)""",
+                (last_at, last_at, last_at))
+            conn.execute("""INSERT INTO monitored_exchanges
+                (platform, conversation_id, in_job_pool, first_seen_at, updated_at,
+                 scan_token, resume_delivery_message_id)
+                VALUES ('boss', 'outside', 0, ?, ?, 'scan', 'resume-1')""",
+                (last_at, last_at))
+            conn.commit()
+
+        result = get_conversion_flow(self.path, first_day, self.today)
+        self.assertEqual(result["daily_metrics"], [
+            {"date": first_day, "greeted": 1, "hr_initiated": 0,
+             "followups": 0, "deliveries": 0},
+            {"date": middle_day, "greeted": 0, "hr_initiated": 0,
+             "followups": 0, "deliveries": 0},
+            {"date": self.today, "greeted": 0, "hr_initiated": 1,
+             "followups": 1, "deliveries": 1},
+        ])
+        for key in ("greeted", "hr_initiated", "followups", "deliveries"):
+            self.assertEqual(sum(day[key] for day in result["daily_metrics"]),
+                             result["metrics"][key])
 
     def test_repeated_followups_count_once_per_conversation(self):
         with closing(sqlite3.connect(self.path)) as conn:
@@ -160,10 +196,31 @@ class ConversionTests(unittest.TestCase):
         self.assertEqual(body["metrics"]["deliveries"], 0)
         self.assertIsNotNone(datetime.fromisoformat(body["generated_at"]).tzinfo)
 
+    def test_chart_refresh_endpoint_validates_dates_before_starting_monitoring(self):
+        handler_class = make_handler(self.path, MagicMock(), restart_event=Event(),
+            started_ai_concurrency=1, state_db_overridden=True, server_instance_id="test")
+        handler = object.__new__(handler_class)
+        handler.send_json = MagicMock()
+        handler.path = "/api/workbench/conversion/refresh"
+        handler.read_json = MagicMock(return_value={"start": "bad", "end": self.today})
+        with patch("api.server.MonitoringRun.start") as start:
+            handler.do_POST()
+        self.assertEqual(handler.send_json.call_args.args[0], 400)
+        start.assert_not_called()
+
+        handler.read_json.return_value = {"start": self.today, "end": self.today}
+        with patch("api.server.MonitoringRun.start", return_value={
+                "run_id": 12, "status": "running", "phase": "conversion"}) as start:
+            handler.do_POST()
+        self.assertEqual(handler.send_json.call_args.args,
+                         (202, {"run_id": 12, "status": "running", "phase": "conversion"}))
+        start.assert_called_once_with("conversion", chart_range=(self.today, self.today))
+
     def test_generated_chart_persists_until_next_successful_generation(self):
         self.assertIsNone(get_saved_conversion_flow(self.path))
         first = generate_and_save_conversion_flow(self.path, self.today, self.today)
         self.assertEqual(get_saved_conversion_flow(self.path), first)
+        self.assertEqual(first["daily_metrics"][0]["date"], self.today)
 
         with self.assertRaises(JobActionError):
             generate_and_save_conversion_flow(self.path, "bad", self.today)

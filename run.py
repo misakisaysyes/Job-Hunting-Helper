@@ -7,6 +7,7 @@ from concurrent.futures import FIRST_COMPLETED, wait
 from io import StringIO
 import math
 from pathlib import Path
+from threading import Event
 from typing import Any
 import unittest
 from unittest.mock import patch
@@ -150,11 +151,14 @@ def run_collection(
     on_event: Callable[[str], None] | None = None,
     on_progress: Callable[[dict[str, int]], None] | None = None,
     ai_scheduler: AITaskScheduler | None = None,
+    stop_event: Event | None = None,
 ) -> PlatformCollectionResult:
     """Run the configured collection session with independently optional AI tasks."""
     validate_run_config(config)
     if config["collection"]["test_prefilter"]:
         _check_prefilter(on_event)
+    if stop_event is not None and stop_event.is_set():
+        return PlatformCollectionResult("boss", "stopped", "user_stopped", "用户已停止")
     request = build_boss_request(config)
     conn = open_safety_db(Path(config["safety"]["state_db"]))
     try:
@@ -167,6 +171,10 @@ def run_collection(
         browser = ChromeBrowser(config["browser"]["cdp_url"],
                                 silent_background=config["browser"].get("silent_background", False))
         try:
+            def stop_requested() -> bool:
+                return stop_event is not None and stop_event.is_set()
+
+            stop_kwargs = {"stop_event": stop_event} if stop_event is not None else {}
             max_jobs = config["collection"]["max_jobs"]
             target_jobs = config["collection"]["target_jobs"]
             progress_counts = {"qualified": 0, "target": target_jobs}
@@ -203,7 +211,7 @@ def run_collection(
                 )
                 result = runner.run(
                     request, on_job=save_plain,
-                    on_event=on_event, max_jobs=max_jobs,
+                    on_event=on_event, max_jobs=max_jobs, **stop_kwargs,
                 )
                 if result.reason_code:
                     result.counts.update(qualified=qualified, target=target_jobs)
@@ -219,6 +227,12 @@ def run_collection(
 
             def submit_greeting(record: dict[str, Any]) -> None:
                 nonlocal greeting_failed
+                if stop_requested():
+                    greeting_failed += 1
+                    record.update(ai_greeting_status="failed",
+                                  ai_greeting_error="采集已中断，招呼语未生成")
+                    emit_record(record)
+                    return
                 try:
                     task = make_greeting_task(
                         record, resume_text, config["ai"]["greeting_user_prompt"])
@@ -264,7 +278,7 @@ def run_collection(
                 progress_counts.update(qualified=qualified, ai_scored=scored,
                                        ai_score_failed=failed)
                 report_counts()
-                if eligible and config["ai"]["use_ai_greeting"]:
+                if eligible and config["ai"]["use_ai_greeting"] and not stop_requested():
                     submit_greeting(record)
                 else:
                     template = config["ai"]["greeting_template"].strip()
@@ -273,31 +287,49 @@ def run_collection(
                     emit_record(record)
 
             def drain_scores(wait_for_all: bool = False) -> None:
-                ready = [(job, future) for job, future in score_jobs
-                         if wait_for_all or future.done()]
-                if not ready:
-                    return
-                ready_futures = {future for _, future in ready}
-                score_jobs[:] = [(job, future) for job, future in score_jobs
-                                 if future not in ready_futures]
-                for job, future in ready:
-                    finish_score(job, future)
+                while True:
+                    ready = [(job, future) for job, future in score_jobs if future.done()]
+                    if ready:
+                        ready_futures = {future for _, future in ready}
+                        score_jobs[:] = [(job, future) for job, future in score_jobs
+                                         if future not in ready_futures]
+                        for job, future in ready:
+                            finish_score(job, future)
+                    if not wait_for_all or not score_jobs or stop_requested():
+                        return
+                    wait([future for _, future in score_jobs], timeout=0.2,
+                         return_when=FIRST_COMPLETED)
+
+            def mark_score_interrupted(job: JobCandidate) -> None:
+                nonlocal failed
+                failed += 1
+                record = job.as_job_record()
+                record.update(ai_score_status="score_failed", ai_score=None,
+                              ai_score_reason="", ai_score_error="采集已中断，评分未完成")
+                emit_record(record)
+                progress_counts["ai_score_failed"] = failed
+                report_counts()
 
             def submit_score(job: JobCandidate) -> None:
+                if stop_requested():
+                    mark_score_interrupted(job)
+                    return
                 task = make_score_task(job, resume_text, config["ai"]["score_user_prompt"])
                 future = scheduler.submit(task)
                 score_jobs.append((job, future))
                 drain_scores()
                 pending_limit = max(4, config["ai"]["ai_api_concurrency"] * 2)
                 pending_limit = min(pending_limit, max(1, target_jobs - qualified))
-                if len(score_jobs) >= pending_limit:
-                    wait([pending for _, pending in score_jobs], return_when=FIRST_COMPLETED)
+                while len(score_jobs) >= pending_limit and not stop_requested():
+                    wait([pending for _, pending in score_jobs], timeout=0.2,
+                         return_when=FIRST_COMPLETED)
                     drain_scores()
 
             def target_reached() -> bool:
                 drain_scores()
                 return qualified >= target_jobs
 
+            interrupted = False
             try:
                 runner = CollectionOrchestrator(
                     browser=browser, config=config, safety_conn=conn,
@@ -309,13 +341,32 @@ def run_collection(
                 result = runner.run(
                     request, on_job=lambda job: None,
                     on_prefilter_pass=submit_score if config["ai"]["use_ai_score"] else submit_unscored,
-                    on_event=on_event, max_jobs=max_jobs,
+                    on_event=on_event, max_jobs=max_jobs, **stop_kwargs,
                 )
-                drain_scores(wait_for_all=True)
+                interrupted = result.status == "stopped" or stop_requested()
+                drain_scores(wait_for_all=not interrupted)
+                interrupted = interrupted or stop_requested()
+                if interrupted:
+                    for job, future in score_jobs:
+                        future.cancel()
+                        mark_score_interrupted(job)
+                    score_jobs.clear()
 
-                if greeting_jobs and on_event is not None:
+                if greeting_jobs and on_event is not None and not interrupted:
                     on_event(f"正在生成 {len(greeting_jobs)} 条招呼语…")
                 for record, future in greeting_jobs:
+                    while not interrupted and not future.done():
+                        if stop_requested():
+                            interrupted = True
+                            break
+                        wait([future], timeout=0.2)
+                    if interrupted and not future.done():
+                        future.cancel()
+                        greeting_failed += 1
+                        record.update(ai_greeting_status="failed",
+                                      ai_greeting_error="采集已中断，招呼语未生成")
+                        emit_record(record)
+                        continue
                     try:
                         greeting_result = future.result()
                     except Exception as exc:
@@ -328,6 +379,10 @@ def run_collection(
                         record.update(greeting=greeting_result.text,
                                       ai_greeting_status="generated", ai_greeting_error="")
                     emit_record(record)
+                if interrupted:
+                    result.status = "stopped"
+                    result.reason_code = "user_stopped"
+                    result.message = "采集已中断；未完成的 AI 任务可稍后重试"
                 if config["ai"]["use_ai_score"]:
                     result.counts.update(ai_scored=scored, ai_score_failed=failed)
                 if result.reason_code:
@@ -340,7 +395,9 @@ def run_collection(
                 return result
             finally:
                 if ai_scheduler is None:
-                    scheduler.shutdown()
+                    cancel_pending = interrupted or stop_requested()
+                    scheduler.shutdown(wait=not cancel_pending,
+                                       cancel_futures=cancel_pending)
         finally:
             browser.close()
     finally:

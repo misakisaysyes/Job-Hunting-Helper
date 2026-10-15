@@ -10,9 +10,8 @@ export default function BulkActions({ count, canEnd, busy, progress, notice, onA
     <button type="button" disabled={!count || Boolean(busy)} onClick={() => onAction("delete")}>批量删除</button>
     {canEnd && <button type="button" className="bulk-danger" disabled={Boolean(busy)} onClick={() => onAction("end")}>批量结束</button>}
     <button type="button" disabled={!count || Boolean(busy)} onClick={() => onAction("score")}>批量评分</button>
-    <button type="button" disabled={!count || Boolean(busy)} onClick={() => onAction("start")}>批量流转到打招呼</button>
-    <button type="button" disabled={!count || Boolean(busy)} onClick={() => onAction("generate")}>批量生成招呼语</button>
-    <button type="button" disabled={!count || Boolean(busy)} onClick={() => onAction("send")}>批量招呼</button>
+    <button type="button" disabled={!count || Boolean(busy)} onClick={() => onAction("prepare")}>批量生成招呼语</button>
+    <button type="button" disabled={!count || Boolean(busy)} onClick={() => onAction("send")}>批量发送招呼</button>
     <button type="button" disabled={Boolean(busy)} onClick={onClose}>关闭批量操作</button>
   </aside>;
 }

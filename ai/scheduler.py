@@ -47,9 +47,9 @@ class AITaskScheduler:
             raise TypeError("调度单元必须是 AITask")
         return self._executor.submit(task.run, self._model_call)
 
-    def shutdown(self) -> None:
-        """Wait for running and queued tasks to finish."""
-        self._executor.shutdown(wait=True)
+    def shutdown(self, *, wait: bool = True, cancel_futures: bool = False) -> None:
+        """Finish normally, or discard queued tasks after an interrupted run."""
+        self._executor.shutdown(wait=wait, cancel_futures=cancel_futures)
 
     def __enter__(self) -> AITaskScheduler:
         return self

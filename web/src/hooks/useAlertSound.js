@@ -1,19 +1,28 @@
 import { useCallback, useEffect, useRef } from "react";
 
-// One short tone for one completed task.
+// Play pi-web's softer two-note chime twice for each completed task.
 function playConfirmationPattern(context) {
   const start = context.currentTime;
-  const oscillator = context.createOscillator();
-  const gain = context.createGain();
-  oscillator.connect(gain);
-  gain.connect(context.destination);
-  oscillator.type = "sine";
-  oscillator.frequency.value = 659.25;
-  gain.gain.setValueAtTime(0, start);
-  gain.gain.linearRampToValueAtTime(0.28, start + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.001, start + 0.32);
-  oscillator.start(start);
-  oscillator.stop(start + 0.32);
+  for (const repeatOffset of [0, 0.4]) {
+    for (const [index, frequency] of [523.25, 659.25].entries()) {
+      const noteStart = start + repeatOffset + index * 0.18;
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.type = "sine";
+      oscillator.frequency.value = frequency;
+      gain.gain.setValueAtTime(0, noteStart);
+      gain.gain.linearRampToValueAtTime(0.18, noteStart + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, noteStart + 0.42);
+      oscillator.start(noteStart);
+      oscillator.stop(noteStart + 0.42);
+      oscillator.onended = () => {
+        oscillator.disconnect();
+        gain.disconnect();
+      };
+    }
+  }
 }
 
 export function useAlertSound() {

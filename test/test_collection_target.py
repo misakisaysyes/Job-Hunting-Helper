@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
+from threading import Event
 import unittest
 from unittest.mock import patch
 
@@ -98,6 +99,29 @@ class CollectionTargetTests(unittest.TestCase):
                          ["a", "b", "a"])
         self.assertEqual(result.reason_code, "target_reached")
         self.assertEqual(result.counts["qualified"], 2)
+
+    def test_stop_event_preserves_collected_job_and_skips_remaining_jobs(self):
+        self.config["ai"]["use_ai_score"] = False
+        stop = Event()
+        records = []
+        browser = FakeBrowser(lambda *_: [api_job("first"), api_job("second")])
+
+        def keep_first(record):
+            records.append(record)
+            stop.set()
+
+        with patch("collector.platforms.boss.random.SystemRandom.shuffle", lambda _rng, values: None), \
+                patch("run.ChromeBrowser", return_value=browser), \
+                patch("collector.platforms.boss.PageThrottle.wait", return_value=False), \
+                patch("collector.platforms.boss._wait_or_stop", return_value=False), \
+                patch("collector.platforms.boss.BossCollector._refresh_font_digits", return_value=False):
+            result = run_collection(self.config, on_record=keep_first, stop_event=stop)
+
+        self.assertEqual(result.status, "stopped")
+        self.assertEqual([record["source_job_id"] for record in records], ["first"])
+        with closing(sqlite3.connect(self.config["safety"]["state_db"])) as conn:
+            jobs, _ = JobStore(conn).list_jobs(limit=10, offset=0)
+        self.assertEqual([job["source_job_id"] for job in jobs], ["first"])
 
     def test_undecodable_list_and_detail_salary_skip_only_affected_jobs(self):
         self.config["ai"]["use_ai_score"] = False

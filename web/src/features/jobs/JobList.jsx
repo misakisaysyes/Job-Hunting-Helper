@@ -26,7 +26,7 @@ export default function JobList({ jobs, total, statusCounts, page, pageSize, loa
     <section className="panel" aria-label="岗位列表">
       <div className="panel-head">
         <span>岗位列表</span>
-        <span className="range">{total ? `${start}–${end} / ${total}` : "0 条"} · 标色门槛 {scoreThreshold ?? "—"} 分</span>
+        <span className="range">{total ? `${start}–${end} / ${total}` : "0 条"}</span>
       </div>
       <JobToolbar query={query} onQueryChange={onQueryChange}
         status={statusFilter} onStatusChange={onStatusFilterChange}

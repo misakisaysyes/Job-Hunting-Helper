@@ -6,12 +6,14 @@ import CollectionPage from "./features/collection/CollectionPage";
 import MonitoringPage from "./features/monitoring/MonitoringPage";
 import WorkbenchHome from "./features/workbench/WorkbenchHome";
 import ConfigurationPage from "./features/config/ConfigurationPage";
-import { useTaskCompletionAlert } from "./hooks/useTaskCompletionAlert";
+import { useAlertSound } from "./hooks/useAlertSound";
+import { claimTaskCompletion, createTaskCompletionTracker } from "./lib/taskCompletion";
 
 const PAGE_SIZE = 15;
 const DEFAULT_SCORE_THRESHOLD = 71;
 export default function App() {
-  useTaskCompletionAlert();
+  const { playConfirmationAlert } = useAlertSound();
+  const collectionCompletion = useRef(createTaskCompletionTracker());
   const [activeView, setActiveView] = useState("workbench");
   const [jobs, setJobs] = useState([]);
   const [total, setTotal] = useState(0);
@@ -34,6 +36,16 @@ export default function App() {
   const [collectionError, setCollectionError] = useState("");
   const [statusReady, setStatusReady] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [stopping, setStopping] = useState(false);
+
+  function updateCollection(state) {
+    if (collectionCompletion.current.observe(state)) {
+      void claimTaskCompletion(`collection:${state.run_id}`).then((claimed) => {
+        if (claimed) playConfirmationAlert();
+      });
+    }
+    setCollection(state);
+  }
 
   async function load(nextPage, nextQuery = query, nextStatus = statusFilter, { silent = false } = {}) {
     const sequence = ++requestSequence.current;
@@ -83,7 +95,7 @@ export default function App() {
   useEffect(() => {
     let active = true;
     requestJson("/api/collections/current")
-      .then((state) => { if (active) setCollection(state); })
+      .then((state) => { if (active) updateCollection(state); })
       .catch((cause) => { if (active) setCollectionError(cause.message || "无法读取采集状态"); })
       .finally(() => { if (active) setStatusReady(true); });
     return () => { active = false; };
@@ -112,41 +124,55 @@ export default function App() {
   }, [activeView, page, query, statusFilter]);
 
   useEffect(() => {
-    if (collection.status !== "running") return;
+    if (activeView !== "collection" && collection.status !== "running") return;
     let active = true;
     let timer;
     async function pollCollection() {
-      let keepPolling = true;
+      let keepPolling = activeView === "collection";
       try {
         const state = await requestJson("/api/collections/current");
         if (!active) return;
-        setCollection(state);
+        updateCollection(state);
         setCollectionError("");
-        if (state.status !== "running") {
-          keepPolling = false;
+        keepPolling = activeView === "collection" || state.status === "running";
+        if (state.status !== "running" && collection.status === "running") {
           const current = listViewRef.current;
           if (!loadingRef.current) void load(current.page, current.query, current.statusFilter, { silent: true });
         }
       } catch (cause) {
         if (active) setCollectionError(cause.message || "无法读取采集状态");
       } finally {
-        if (active && keepPolling) timer = window.setTimeout(pollCollection, 2000);
+        if (active && keepPolling) timer = window.setTimeout(pollCollection, 3000);
       }
     }
-    timer = window.setTimeout(pollCollection, 2000);
+    if (activeView === "collection") void pollCollection();
+    else timer = window.setTimeout(pollCollection, 2000);
     return () => { active = false; window.clearTimeout(timer); };
-  }, [collection.status]);
+  }, [activeView, collection.status]);
 
   async function startCollection() {
     setStarting(true);
     setCollectionError("");
     try {
       const state = await requestJson("/api/collections", jsonOptions("POST"));
-      setCollection(state);
+      updateCollection(state);
     } catch (cause) {
       setCollectionError(cause.message || "启动采集失败");
     } finally {
       setStarting(false);
+    }
+  }
+
+  async function stopCollection() {
+    setStopping(true);
+    setCollectionError("");
+    try {
+      const state = await requestJson("/api/collections/stop", jsonOptions("POST"));
+      updateCollection(state);
+    } catch (cause) {
+      setCollectionError(cause.message || "中断采集失败");
+    } finally {
+      setStopping(false);
     }
   }
 
@@ -189,7 +215,8 @@ export default function App() {
             query={query} onQueryChange={setQuery} statusFilter={statusFilter}
             onStatusFilterChange={setStatusFilter} collection={collection}
             collectionError={collectionError} error={error} thresholdWarning={thresholdWarning}
-            statusReady={statusReady} starting={starting} onStart={startCollection} />
+            statusReady={statusReady} starting={starting} stopping={stopping}
+            onStart={startCollection} onStop={stopCollection} />
         ) : activeView === "monitoring" ? <MonitoringPage /> : <ConfigurationPage />}
       </div>
     </div>

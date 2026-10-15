@@ -103,6 +103,7 @@ import sys
 
 with socket.socket() as probe:
     try:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         probe.bind(("127.0.0.1", int(sys.argv[1])))
     except OSError as error:
         if error.errno == errno.EADDRINUSE:

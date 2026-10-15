@@ -12,6 +12,16 @@ from zoneinfo import ZoneInfo
 LOCAL_ZONE = ZoneInfo("Asia/Shanghai")
 TASK_TYPES = ("collection", "monitoring", "monitoring_followup", "monitoring_delete")
 MONITORING_PHASES = ("communicated", "exchanged", "new_greetings")
+
+
+def monitoring_phases_for_scope(scope: str) -> tuple[str, ...]:
+    if scope in MONITORING_PHASES:
+        return (scope,)
+    if scope == "conversion":
+        return ("communicated", "exchanged")
+    return ("communicated", "new_greetings")
+
+
 TASK_LABELS = {"collection": "采集", "monitoring": "扫描会话",
                "monitoring_followup": "批量追问", "monitoring_delete": "批量删除会话"}
 
@@ -103,7 +113,7 @@ class TaskRunStore:
                 run = self._run_snapshot(row)
                 counts = run["counts"]
                 scope = counts.get("phase", "all")
-                phases = (scope,) if scope in MONITORING_PHASES else ("communicated", "new_greetings")
+                phases = monitoring_phases_for_scope(scope)
                 phase_states = counts.get("phase_states")
                 phase_states = phase_states if isinstance(phase_states, dict) else {}
                 for phase in phases:
@@ -146,7 +156,7 @@ class TaskRunStore:
             for run_id, run_status, raw_counts in rows:
                 counts = json.loads(raw_counts)
                 scope = counts.get("phase", "all")
-                phases = (scope,) if scope in MONITORING_PHASES else ("communicated", "new_greetings")
+                phases = monitoring_phases_for_scope(scope)
                 states = counts.get("phase_states")
                 states = states if isinstance(states, dict) else {}
                 for phase in phases:

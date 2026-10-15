@@ -16,6 +16,7 @@ from browser.boss_filter import FilterDeleteResult
 from api.conversations import (delete_conversation_record, delete_exchanged_conversation,
                                open_conversation, open_exchanged_conversation,
                                open_filter_candidate, terminate_monitoring)
+from api.conversion import generate_and_save_conversion_flow, get_saved_conversion_flow
 from api.jobs import JobActionError
 from api.monitoring import MonitoringRun
 from api.server import make_handler
@@ -431,6 +432,64 @@ class MonitoringBackendTests(unittest.TestCase):
             self.assertEqual(state["phases"]["communicated"]["status"], "not_run")
             self.assertEqual(state["phases"]["new_greetings"]["status"], "pending")
             self.assertEqual(thread.call_args.kwargs["args"][-2], "new_greetings")
+
+    def test_chart_refresh_scans_only_two_phases_then_saves_both_charts(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite"
+            today = datetime.now(timezone(timedelta(hours=8))).date().isoformat()
+            run = MonitoringRun(path)
+            with patch("api.monitoring.Thread"):
+                started = run.start("conversion", chart_range=(today, today))
+            self.assertEqual(started["phases"]["new_greetings"]["status"], "not_run")
+            self.assertIsNone(get_saved_conversion_flow(path))
+            steps = []
+
+            def scan_communicated(*args, **kwargs):
+                steps.append("communicated")
+                self.assertIsNone(get_saved_conversion_flow(path))
+                return []
+
+            def scan_exchanged(*args, **kwargs):
+                steps.append("exchanged")
+                self.assertIsNone(get_saved_conversion_flow(path))
+                return []
+
+            def save_chart(*args):
+                steps.append("charts")
+                return generate_and_save_conversion_flow(*args)
+
+            with patch("api.monitoring.scan_recent_conversations", side_effect=scan_communicated) as communicated, \
+                    patch("api.monitoring.scan_exchanged_conversations", side_effect=scan_exchanged) as exchanged, \
+                    patch("api.monitoring.generate_and_save_conversion_flow", side_effect=save_chart), \
+                    patch("api.monitoring.scan_new_greetings") as new_greetings:
+                run._execute(run_id=started["run_id"], phase="conversion",
+                             browser_config={"cdp_url": "cdp", "silent_background": False},
+                             chart_range=(today, today))
+            communicated.assert_called_once()
+            exchanged.assert_called_once()
+            new_greetings.assert_not_called()
+            self.assertEqual(steps, ["communicated", "exchanged", "charts"])
+            snapshot = get_saved_conversion_flow(path)
+            self.assertEqual(snapshot["daily_metrics"][0]["date"], today)
+            self.assertEqual(run.snapshot()["status"], "completed")
+            phases = MonitoringRun(path).snapshot()["phase_runs"]
+            self.assertEqual(phases["communicated"]["run_id"], started["run_id"])
+            self.assertEqual(phases["exchanged"]["run_id"], started["run_id"])
+            self.assertEqual(TaskRunStore(path).today_monitoring_phases()["new_greetings"]["runs"], 0)
+
+    def test_chart_refresh_failure_does_not_replace_saved_chart(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite"
+            today = datetime.now(timezone(timedelta(hours=8))).date().isoformat()
+            run = MonitoringRun(path)
+            with patch("api.monitoring.scan_recent_conversations", return_value=[]), \
+                    patch("api.monitoring.scan_exchanged_conversations", side_effect=RuntimeError("scan failed")), \
+                    patch("api.monitoring.scan_new_greetings") as new_greetings:
+                run._execute(phase="conversion", chart_range=(today, today),
+                             browser_config={"cdp_url": "cdp", "silent_background": False})
+            self.assertEqual(run.snapshot()["status"], "failed")
+            self.assertIsNone(get_saved_conversion_flow(path))
+            new_greetings.assert_not_called()
 
     def test_phase_results_survive_other_scans_and_api_restart(self) -> None:
         with TemporaryDirectory() as directory:

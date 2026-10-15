@@ -32,35 +32,59 @@ def _bounds(start_value: str, end_value: str) -> tuple[str, str]:
     return lower.isoformat(), upper.isoformat()
 
 
+def _local_day(value: str) -> str:
+    timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
+    return timestamp.astimezone(LOCAL_ZONE).date().isoformat()
+
+
+def validate_conversion_range(start_date: object, end_date: object) -> None:
+    if not isinstance(start_date, str) or not isinstance(end_date, str):
+        raise JobActionError("请选择有效的开始日期和结束日期", 400)
+    _bounds(start_date, end_date)
+
+
 def get_conversion_flow(db_path: Path, start_date: str, end_date: str) -> dict:
     lower, upper = _bounds(start_date, end_date)
     with closing(sqlite3.connect(db_path, timeout=10)) as conn:
         JobStore(conn)
         ConversationStore(conn)
         ExchangeStore(conn)
-        greeted = conn.execute("""SELECT platform, source_job_id FROM collected_jobs
+        greeted = conn.execute("""SELECT platform, source_job_id, updated_at FROM collected_jobs
             WHERE job_status = 'greeted' AND updated_at >= ? AND updated_at < ?""",
             (lower, upper)).fetchall()
-        initiated = conn.execute("""SELECT platform, conversation_id, source_job_id
+        initiated = conn.execute("""SELECT platform, conversation_id, source_job_id, first_seen_at
             FROM monitored_exchanges
             WHERE in_job_pool = 0 AND first_seen_at >= ? AND first_seen_at < ?""",
             (lower, upper)).fetchall()
-        followed = conn.execute("""SELECT platform, conversation_id, source_job_id
+        followed = conn.execute("""SELECT platform, conversation_id, source_job_id, updated_at
             FROM monitored_conversations
             WHERE judgment IN ('unread', 'read_no_reply') AND followup_count > 0
               AND updated_at >= ? AND updated_at < ?""",
             (lower, upper)).fetchall()
-        exchanged = conn.execute("""SELECT platform, conversation_id, source_job_id
+        exchanged = conn.execute("""SELECT platform, conversation_id, source_job_id, first_seen_at
             FROM monitored_exchanges
             WHERE resume_delivery_message_id != ''
               AND first_seen_at >= ? AND first_seen_at < ?""",
             (lower, upper)).fetchall()
 
+    start_day = date.fromisoformat(start_date)
+    day_count = (date.fromisoformat(end_date) - start_day).days + 1
+    daily_metrics = [{"date": (start_day + timedelta(days=offset)).isoformat(),
+                      "greeted": 0, "hr_initiated": 0, "followups": 0, "deliveries": 0}
+                     for offset in range(day_count)]
+    daily_by_date = {row["date"]: row for row in daily_metrics}
+    for key, rows in (("greeted", greeted), ("hr_initiated", initiated),
+                      ("followups", followed), ("deliveries", exchanged)):
+        for row in rows:
+            daily_by_date[_local_day(row[-1])][key] += 1
+
     contacts: dict[tuple[str, str, str], dict] = {}
-    for platform, job_id in greeted:
+    for platform, job_id, _ in greeted:
         contacts.setdefault(("job", platform, job_id),
                             {"source": "greeted", "followed_up": False, "delivered": False})
-    for platform, conversation_id, _ in initiated:
+    for platform, conversation_id, _, _ in initiated:
         contacts.setdefault(("conversation", platform, conversation_id),
                             {"source": "hr_initiated", "followed_up": False, "delivered": False})
 
@@ -72,9 +96,9 @@ def get_conversion_flow(db_path: Path, start_date: str, end_date: str) -> dict:
         return contacts.setdefault(key, {"source": "earlier_or_unknown",
                                         "followed_up": False, "delivered": False})
 
-    for platform, conversation_id, job_id in followed:
+    for platform, conversation_id, job_id, _ in followed:
         contact(platform, conversation_id, job_id)["followed_up"] = True
-    for platform, conversation_id, job_id in exchanged:
+    for platform, conversation_id, job_id, _ in exchanged:
         contact(platform, conversation_id, job_id)["delivered"] = True
 
     flows: dict[tuple[str, bool, bool], int] = {}
@@ -87,6 +111,7 @@ def get_conversion_flow(db_path: Path, start_date: str, end_date: str) -> dict:
         "metrics": {"greeted": len(greeted), "hr_initiated": len(initiated),
                     "followups": len(followed), "deliveries": len(exchanged),
                     "contacts": len(contacts)},
+        "daily_metrics": daily_metrics,
         "flows": [{"source": source, "followed_up": followed_up,
                    "delivered": delivered, "count": count}
                   for (source, followed_up, delivered), count in sorted(flows.items())],
@@ -111,8 +136,7 @@ def get_saved_conversion_flow(db_path: Path) -> dict | None:
 
 
 def generate_and_save_conversion_flow(db_path: Path, start_date: object, end_date: object) -> dict:
-    if not isinstance(start_date, str) or not isinstance(end_date, str):
-        raise JobActionError("请选择有效的开始日期和结束日期", 400)
+    validate_conversion_range(start_date, end_date)
     result = get_conversion_flow(db_path, start_date, end_date)
     with closing(sqlite3.connect(db_path, timeout=10)) as conn, conn:
         _ensure_snapshot_table(conn)

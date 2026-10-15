@@ -8,9 +8,10 @@ export const SCAN_METRIC_GROUPS = [
 ];
 
 export function ScanTaskMetrics({ counts, empty = false, phase: selectedPhase, showTitle = true }) {
+  const scope = selectedPhase || counts?.phase;
   return <div className="monitoring-task-metric-groups">
-    {SCAN_METRIC_GROUPS.filter(({ phase }) => !(selectedPhase || counts?.phase)
-      || phase === (selectedPhase || counts?.phase)).map(({ title, fields }) => <div key={title}>
+    {SCAN_METRIC_GROUPS.filter(({ phase }) => !scope || phase === scope
+      || (scope === "conversion" && phase !== "new_greetings")).map(({ title, fields }) => <div key={title}>
       {showTitle && <h5>{title}</h5>}
       <div className="workbench-run-metrics">
         {fields.map(([key, label]) => <span key={key}>{label} <strong>{counts?.[key] ?? (empty ? 0 : "—")}</strong></span>)}

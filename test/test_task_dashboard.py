@@ -6,18 +6,20 @@ import json
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
-from threading import Barrier
+from threading import Barrier, Event
 from types import SimpleNamespace
+import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from api.collection import CollectionRun
 from api.jobs import JobActionError
-from api.server import requires_service_restart
+from api.server import make_handler, requires_service_restart
 from api.tasks import get_task_history
 from api.settings import (SettingsError, apply_full_settings, read_full_settings, save_full_settings,
                           save_resume_upload)
 from config import DEFAULT_CONFIG, MONITORING_CONFIG
+from collector.models import PlatformCollectionResult
 from data.job_store import JobStore
 from data.task_run_store import TaskAlreadyRunning, TaskRunStore
 
@@ -106,6 +108,37 @@ class FullSettingsTests(unittest.TestCase):
                                                  state_db_overridden=False))
         self.assertFalse(requires_service_restart(saved, concurrency, db_path,
                                                   state_db_overridden=True))
+
+    def test_apply_waits_for_running_task_without_losing_saved_changes(self):
+        # Keep this case valid when the local default collection mode is search.
+        if DEFAULT_CONFIG["collection"]["mode"] == "search":
+            DEFAULT_CONFIG["collection"]["encrypt_expect_id"] = []
+        db_path = Path(self.temp.name) / "tasks.sqlite3"
+        task_runs = TaskRunStore(db_path)
+        run_id = task_runs.start("monitoring", "2026-10-15T01:00:00+00:00", "扫描中")
+        original_limit = MONITORING_CONFIG["message_limit"]
+        new_limit = original_limit + 1 if original_limit < 1000 else original_limit - 1
+        save_full_settings({"monitoring": {"message_limit": new_limit}})
+        handler_class = make_handler(db_path, MagicMock(), restart_event=Event(),
+            started_ai_concurrency=DEFAULT_CONFIG["ai"]["ai_api_concurrency"],
+            state_db_overridden=True, server_instance_id="test")
+        handler = object.__new__(handler_class)
+        handler.path = "/api/settings/full/apply"
+        handler.send_json = MagicMock()
+
+        handler.do_POST()
+        status, response = handler.send_json.call_args.args
+        self.assertEqual(status, 409)
+        self.assertEqual(response["code"], "active_task_blocks_settings_apply")
+        self.assertTrue(read_full_settings()["pending_apply"])
+        self.assertEqual(read_full_settings()["settings"]["monitoring"]["message_limit"], new_limit)
+        self.assertEqual(MONITORING_CONFIG["message_limit"], original_limit)
+
+        task_runs.finish(run_id, "completed", "扫描完成", {}, "2026-10-15T01:01:00+00:00")
+        handler.do_POST()
+        self.assertEqual(handler.send_json.call_args.args[0], 200)
+        self.assertEqual(MONITORING_CONFIG["message_limit"], new_limit)
+        self.assertFalse(read_full_settings()["pending_apply"])
 
 
 class TaskRunStoreTests(unittest.TestCase):
@@ -265,6 +298,81 @@ class TaskRunStoreTests(unittest.TestCase):
             self.assertEqual(row["status"], "completed")
             self.assertEqual(row["counts"], {"seen": 4, "new": 2})
 
+    def test_collection_status_exposes_active_config_and_persisted_latest_run(self):
+        with TemporaryDirectory() as temp, patch.dict(DEFAULT_CONFIG["collection"], {
+                "mode": "recommend", "encrypt_expect_id": ["abcdef123456"],
+                "boss_salary_decode_failure": "stop",
+        }):
+            db_path = Path(temp) / "tasks.sqlite3"
+            runner = CollectionRun(db_path)
+            config = runner.snapshot()["config_summary"]
+            self.assertEqual(config["mode"], "recommend")
+            self.assertEqual(config["expect_id_prefixes"], ["abcdef"])
+            self.assertEqual(config["target_jobs"], DEFAULT_CONFIG["collection"]["target_jobs"])
+            self.assertNotIn("resume_path", config)
+            self.assertNotIn("api_key_env", config)
+            run_id = runner.run_store.start(
+                "collection", "2026-10-15T01:30:00+00:00", "采集中")
+            runner.run_store.finish(run_id, "completed", "采集完成",
+                                    {"seen": 5, "new": 2}, "2026-10-15T01:35:00+00:00")
+            restarted = CollectionRun(db_path)
+            latest = restarted.snapshot()["latest_run"]
+            self.assertEqual(latest["run_id"], run_id)
+            self.assertEqual(latest["counts"], {"seen": 5, "new": 2})
+
+    def test_collection_stop_preserves_progress_and_finishes_task(self):
+        with TemporaryDirectory() as temp, \
+                patch.dict(DEFAULT_CONFIG["collection"], {
+                    "mode": "recommend", "encrypt_expect_id": ["test-id"], "keywords": [],
+                }), patch.dict(DEFAULT_CONFIG["ai"], {
+                    "use_ai_score": False, "use_ai_greeting": False,
+                }):
+            runner = CollectionRun(Path(temp) / "tasks.sqlite3")
+            self.assertIsNone(runner.stop())
+            entered = Event()
+
+            def fake_collection(config, *, stop_event, on_progress, **kwargs):
+                on_progress({"seen": 3, "new": 1})
+                entered.set()
+                self.assertTrue(stop_event.wait(2))
+                return PlatformCollectionResult("boss", "stopped", "user_stopped",
+                                                "用户已停止", counts={"seen": 3, "new": 1})
+
+            with patch("api.collection.run_collection", side_effect=fake_collection):
+                runner.start()
+                self.assertTrue(entered.wait(2))
+                stopping = runner.stop()
+                self.assertEqual((stopping["status"], stopping["stopping"]), ("running", True))
+                deadline = time.monotonic() + 2
+                while runner.snapshot()["status"] == "running" and time.monotonic() < deadline:
+                    time.sleep(0.01)
+
+            finished = runner.snapshot()
+            self.assertEqual((finished["status"], finished["stopping"]), ("stopped", False))
+            self.assertEqual(finished["counts"]["new"], 1)
+            self.assertIsNotNone(finished["finished_at"])
+            self.assertIsNone(runner.stop())
+            self.assertEqual(runner.run_store.latest("collection")["status"], "stopped")
+
+    def test_collection_stop_api_returns_state_or_conflict(self):
+        with TemporaryDirectory() as temp:
+            handler_class = make_handler(Path(temp) / "tasks.sqlite3", MagicMock(),
+                restart_event=Event(), started_ai_concurrency=1,
+                state_db_overridden=True, server_instance_id="test")
+            handler = object.__new__(handler_class)
+            handler.path = "/api/collections/stop"
+            handler.read_json = MagicMock(return_value={})
+            handler.send_json = MagicMock()
+            with patch("api.collection.CollectionRun.stop", return_value={
+                    "status": "running", "stopping": True}) as stop:
+                handler.do_POST()
+            stop.assert_called_once_with()
+            self.assertEqual(handler.send_json.call_args.args,
+                             (202, {"status": "running", "stopping": True}))
+            with patch("api.collection.CollectionRun.stop", return_value=None):
+                handler.do_POST()
+            self.assertEqual(handler.send_json.call_args.args[0], 409)
+
     def test_web_collection_ignores_legacy_stop_salary_setting(self):
         with TemporaryDirectory() as temp, \
                 patch.dict(DEFAULT_CONFIG["collection"], {
@@ -277,6 +385,8 @@ class TaskRunStoreTests(unittest.TestCase):
             runner.start()
             config = thread.call_args.kwargs["args"][0]
             self.assertEqual(config["collection"]["boss_salary_decode_failure"], "skip_job")
+            self.assertEqual(runner.snapshot()["config_summary"]["salary_decode_failure"], "skip_job")
+            self.assertEqual(runner.snapshot()["config_summary"]["max_jobs"], 0)
             self.assertEqual(DEFAULT_CONFIG["collection"]["boss_salary_decode_failure"], "stop")
 
     def test_running_collection_counts_are_visible_in_both_status_and_today(self):

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAlertSound } from "../../hooks/useAlertSound";
+import { claimTaskCompletion } from "../../lib/taskCompletion";
 import { getMonitoringBatch, startMonitoringBatch } from "../../api/monitoring";
 import { executeMonitoringBatch, executeRecordedMonitoringBatch } from "./monitoringBatch";
 import { monitoringKey, selectPageConversations, toggleSelectedConversation } from "./monitoringSelection";
@@ -79,6 +80,9 @@ export default function useMonitoringBatch({ items, page, filters, actions, onRe
         }, { start: startMonitoringBatch, read: getMonitoringBatch,
           wait: () => new Promise((resolve) => window.setTimeout(resolve, 1000)) });
         setNotice(`${state.message}${skipped ? `另有 ${skipped} 条不符合条件，未提交。` : ""}`);
+        if (await claimTaskCompletion(`monitoring_${action.batchAction}:${state.run_id}`)) {
+          playConfirmationAlert();
+        }
       } else {
         const { success, processed, failures } = await executeMonitoringBatch(eligible, action,
           (done, total) => setProgress(`正在${action.label}：${done}/${total}`));

@@ -15,6 +15,7 @@ from browser.boss_monitor import _effective
 from browser.browser import ChromeBrowser
 from api.followups import proposal
 from api.filtering import delete_candidate, matched_company_term
+from api.conversion import generate_and_save_conversion_flow
 from config import DEFAULT_CONFIG, MONITORING_CONFIG
 from data.conversation_store import ConversationStore
 from data.exchange_store import ExchangeStore
@@ -47,21 +48,21 @@ def _initial_counts() -> dict[str, int]:
 
 
 MONITORING_PHASES = frozenset({"communicated", "exchanged", "new_greetings"})
+CONVERSION_PHASES = frozenset({"communicated", "exchanged"})
 
 
 def _phases_for_run(phase: str) -> dict[str, dict[str, str]]:
     phases = _initial_phases()
-    if phase == "all":
-        phases["exchanged"] = {"status": "not_run", "message": "本轮未启动"}
-    else:
-        for other in MONITORING_PHASES - {phase}:
-            phases[other] = {"status": "not_run", "message": "本轮未启动"}
+    active = ({"communicated", "new_greetings"} if phase == "all" else
+              CONVERSION_PHASES if phase == "conversion" else {phase})
+    for other in MONITORING_PHASES - active:
+        phases[other] = {"status": "not_run", "message": "本轮未启动"}
     return phases
 
 
 def _counts_for_run(phase: str) -> dict[str, object]:
     counts: dict[str, object] = _initial_counts()
-    if phase in MONITORING_PHASES:
+    if phase in MONITORING_PHASES | {"conversion"}:
         counts["phase"] = phase
     counts["phase_states"] = _phases_for_run(phase)
     return counts
@@ -110,9 +111,11 @@ class MonitoringRun:
             "filter_review_required": config["filter_review_required"],
         }
 
-    def start(self, phase: str = "all") -> dict | None:
-        if not isinstance(phase, str) or phase not in MONITORING_PHASES | {"all"}:
+    def start(self, phase: str = "all", *, chart_range: tuple[str, str] | None = None) -> dict | None:
+        if not isinstance(phase, str) or phase not in MONITORING_PHASES | {"all", "conversion"}:
             raise ValueError("未知监测任务类型")
+        if phase == "conversion" and chart_range is None:
+            raise ValueError("图表刷新任务缺少日期范围")
         with self.lock:
             if self.status == "running":
                 return None
@@ -131,8 +134,11 @@ class MonitoringRun:
                 "exchanged": "正在连接 Chrome 并读取「有交换」会话…",
                 "new_greetings": "正在连接 Chrome 并读取「新招呼」会话…",
                 "all": "正在连接 Chrome 并读取最近会话…",
+                "conversion": "正在扫描「仅沟通」与「有交换」，完成后生成图表…",
             }[phase]
             counts = _counts_for_run(phase)
+            if chart_range is not None:
+                counts.update(chart_start=chart_range[0], chart_end=chart_range[1])
             run_id = self.run_store.start("monitoring", started_at, message, counts=counts)
             self.status = "running"
             self.message = message
@@ -147,6 +153,7 @@ class MonitoringRun:
         blocked_terms = deepcopy(DEFAULT_CONFIG["profile"]["blocked_companies"])
         browser_config = deepcopy(DEFAULT_CONFIG["browser"])
         Thread(target=self._execute, args=(config, run_id, blocked_terms, phase, browser_config),
+               kwargs={"chart_range": chart_range} if chart_range else {},
                name="web-monitoring", daemon=True).start()
         return state
 
@@ -180,8 +187,11 @@ class MonitoringRun:
 
     def _execute(self, config: dict | None = None, run_id: int | None = None,
                  blocked_terms: list[str] | None = None, phase: str = "all",
-                 browser_config: dict | None = None) -> None:
+                 browser_config: dict | None = None,
+                 *, chart_range: tuple[str, str] | None = None) -> None:
         counts = _counts_for_run(phase)
+        if chart_range is not None:
+            counts.update(chart_start=chart_range[0], chart_end=chart_range[1])
         shared_browser = None
         try:
             with self.lock:
@@ -202,7 +212,7 @@ class MonitoringRun:
                                                silent_background=True)
             shared_browser_options = {"browser": shared_browser} if shared_browser is not None else {}
             conversations = []
-            if phase in {"all", "communicated"}:
+            if phase in {"all", "communicated", "conversion"}:
                 self._phase_progress("communicated", "scanning", "正在扫描「仅沟通」会话列表…", counts)
                 with closing(sqlite3.connect(self.db_path, timeout=10)) as conn:
                     skip_conversation_ids = ConversationStore(conn).terminated_ids("boss")
@@ -219,7 +229,7 @@ class MonitoringRun:
                 self._phase_progress("communicated", "processing",
                                      f"已读取 {len(conversations)} 条待监测会话，等待入库", counts)
             exchanges = []
-            if phase == "exchanged":
+            if phase in {"exchanged", "conversion"}:
                 self._phase_progress("exchanged", "scanning", "正在通过「更多」扫描「有交换」会话列表…", counts)
                 exchanges = scan_exchanged_conversations(
                     browser_config["cdp_url"],
@@ -244,7 +254,7 @@ class MonitoringRun:
                                      f"已扫描 {len(new_greetings)} 条新招呼，等待匹配排除词", counts)
             auto_delete: list[str] = []
             with closing(sqlite3.connect(self.db_path, timeout=10)) as conn:
-                if phase == "exchanged":
+                if phase in {"exchanged", "conversion"}:
                     store = ExchangeStore(conn)
                     jobs = JobStore(conn, score_threshold=DEFAULT_CONFIG["ai"]["score_threshold"])
                     scan_token = uuid4().hex
@@ -264,7 +274,7 @@ class MonitoringRun:
                     counts["exchanged_left_scope"] = store.deactivate_unseen(scan_token)
                     self._phase_progress("exchanged", "completed",
                                          f"已记录 {len(exchanges)} 条有交换会话", counts)
-                if phase in {"all", "communicated"}:
+                if phase in {"all", "communicated", "conversion"}:
                     conversations_store = ConversationStore(conn)
                     jobs = JobStore(conn, score_threshold=DEFAULT_CONFIG["ai"]["score_threshold"])
                     scan_token = uuid4().hex
@@ -359,6 +369,11 @@ class MonitoringRun:
                                          f"正在处理命中排除词的新招呼 {index}/{len(auto_delete)}", counts)
                 self._phase_progress("new_greetings", "completed",
                                      f"已扫描 {len(new_greetings)} 条新招呼，命中排除词 {counts['filter_matches']} 条", counts)
+            if phase == "conversion":
+                if chart_range is None:
+                    raise ValueError("图表刷新任务缺少日期范围")
+                self._progress("两项监测已完成，正在生成桑基图和折线图…")
+                generate_and_save_conversion_flow(self.db_path, *chart_range)
         except Exception as exc:
             detail = str(exc).strip()
             with self.lock:
@@ -388,6 +403,8 @@ class MonitoringRun:
                 self.message = (communicated_message if phase == "communicated"
                                 else exchanged_message if phase == "exchanged"
                                 else greetings_message if phase == "new_greetings"
+                                else f"{communicated_message}；{exchanged_message}；图表已更新"
+                                if phase == "conversion"
                                 else f"{communicated_message}；{greetings_message}")
                 self.counts = counts
                 self._active_phase = None

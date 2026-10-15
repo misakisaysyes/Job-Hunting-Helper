@@ -62,10 +62,10 @@ export const FIELD_HELP = {
   "collection.city": "留空表示不指定城市，由 BOSS 当前会话决定范围。",
   "collection.city_code": "城市未在内置映射中时填写。",
   "collection.collection_delay_multiplier": "1～5；数值越大，采集间隔越长。",
-  "profile.education": "按空格添加；留空表示不限。可用：学历不限、初中及以下、中专/中技、高中、大专、本科、硕士、博士。",
-  "profile.experience_filters": "按空格添加；留空表示不限。可用：经验不限、应届生、在校生、1年内、1-3、3-5、5-10、10年以上。",
-  "profile.company_sizes": "按空格添加；留空表示不限。可用：0-20人、20-99人、100-499人、500-999人、1000-9999人、10000人以上。",
-  "profile.recruitment_types": "按空格添加；输入社招、校招或实习。",
+  "profile.education": "可多选；不选表示不限制岗位学历要求。",
+  "profile.experience_filters": "可多选；不选表示不限制岗位工作年限要求。",
+  "profile.company_sizes": "可多选；不选表示不限制公司规模。",
+  "profile.recruitment_types": "可多选社招、校招和实习；不选表示不限制招聘类型。",
   "profile.salary_min": "0 表示不限制下限。",
   "profile.salary_max": "0 表示不限制上限。",
   "profile.deal_breakers": "按空格添加排除词；英文不区分大小写。",
@@ -90,6 +90,24 @@ export const FIELD_OPTIONS = {
   "collection.mode": [["recommend", "推荐流"], ["search", "搜索流"]],
   "collection.sort": [["default", "默认"], ["newest", "最新"]],
   "ai.thinking": [["auto", "自动"], ["enabled", "开启"], ["disabled", "关闭"]],
+};
+
+export const PROFILE_MULTI_OPTIONS = {
+  "profile.education": [
+    ["学历不限", "学历不限"], ["初中及以下", "初中及以下"], ["中专/中技", "中专/中技"],
+    ["高中", "高中"], ["大专", "大专"], ["本科", "本科"], ["硕士", "硕士"], ["博士", "博士"],
+  ],
+  "profile.experience_filters": [
+    ["经验不限", "经验不限"], ["应届生", "应届生"], ["在校生", "在校生"], ["1年内", "1年以内"],
+    ["1-3", "1-3年"], ["3-5", "3-5年"], ["5-10", "5-10年"], ["10年以上", "10年以上"],
+  ],
+  "profile.company_sizes": [
+    ["0-20人", "0-20人"], ["20-99人", "20-99人"], ["100-499人", "100-499人"],
+    ["500-999人", "500-999人"], ["1000-9999人", "1000-9999人"], ["10000人以上", "10000人以上"],
+  ],
+  "profile.recruitment_types": [
+    ["experienced", "社招"], ["campus", "校招"], ["internship", "实习"],
+  ],
 };
 
 export const RESTART_FIELDS = new Set([

@@ -17,3 +17,8 @@ test("legacy combined scans appear in both original scan sections", () => {
   assert.deepEqual(phasesForMonitoringRun({ counts: {} }), ["communicated", "new_greetings"]);
   assert.deepEqual(phasesForMonitoringRun({ counts: { phase: "all" } }), ["communicated", "new_greetings"]);
 });
+
+test("chart refresh scans appear only in communicated and exchanged sections", () => {
+  const run = { counts: { phase: "conversion" } };
+  assert.deepEqual(phasesForMonitoringRun(run), ["communicated", "exchanged"]);
+});

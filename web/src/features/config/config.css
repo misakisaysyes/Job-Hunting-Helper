@@ -31,7 +31,26 @@
 .config-action-notice.success { color: #168457; }
 .config-action-notice.error { color: #c8483e; }
 .config-actions-buttons { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.config-apply-button { background: #fff; color: #1978e6; box-shadow: none; }
+.config-apply-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(26, 39, 60, .44);
+}
+.config-apply-dialog {
+  width: min(440px, 100%);
+  padding: 24px;
+  border: 1px solid #dce5f0;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 18px 60px rgba(25, 43, 70, .22);
+}
+.config-apply-dialog h2 { margin: 0; color: #25334c; font-size: 18px; }
+.config-apply-dialog p { margin: 14px 0 22px; color: #536176; line-height: 1.7; }
+.config-apply-dialog button { display: block; margin-left: auto; }
 
 @media (max-width: 900px) {
   .config-actions { flex-wrap: wrap; }
@@ -113,15 +132,17 @@
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 39px;
-  padding: 5px 32px 5px 8px;
-  border: 1px solid #d9e3ee;
-  border-radius: 8px;
+  min-height: 43px;
+  padding: 7px 32px 7px 9px;
+  border: 1px solid #c9d9eb;
+  border-radius: 9px;
   background: #fff;
 }
-.config-city-control:hover,
-.config-city-control.is-open { border-color: #77afe9; }
-.config-city-control:focus-within { outline: 2px solid #9ac7fa; outline-offset: 1px; }
+.config-city-control:focus-within,
+.config-city-control.is-open {
+  border-color: #79b6f8;
+  box-shadow: 0 0 0 3px #e5f2ff;
+}
 .config-city-opener {
   position: absolute;
   inset: 0;
@@ -151,27 +172,47 @@
   z-index: 2;
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 9px;
   pointer-events: none;
 }
 .config-city-tag {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 4px 6px 4px 9px;
-  border-radius: 6px;
-  background: #e2f0ff;
+  max-width: 100%;
+  min-height: 29px;
+  padding: 5px 25px 5px 10px;
+  border: 1px solid #afd3fa;
+  border-radius: 7px;
+  background: #e8f3ff;
   color: #176bc0;
-  font-size: 11px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 .config-city-tag button {
+  position: absolute;
+  top: 1px;
+  right: 3px;
+  display: grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  padding: 0;
   border: 0;
+  border-radius: 4px;
   background: transparent;
-  color: inherit;
+  color: #478ccf;
   font-size: 15px;
   line-height: 1;
   cursor: pointer;
   pointer-events: auto;
+}
+.config-city-tag button:hover,
+.config-city-tag button:focus-visible {
+  background: #cbe5ff;
+  color: #075ca9;
 }
 .config-city-panel {
   position: absolute;
@@ -186,6 +227,7 @@
   box-shadow: 0 12px 32px #243c5a20;
 }
 .config-city-options { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; max-height: 245px; overflow: auto; }
+.config-profile-options { grid-template-columns: repeat(auto-fit, minmax(115px, 1fr)); }
 .config-city-options label { display: flex; align-items: center; gap: 6px; padding: 7px; border-radius: 6px; cursor: pointer; }
 .config-city-options label:hover { background: #f1f7ff; }
 .config-city-options input { margin: 0; accent-color: #1778df; }

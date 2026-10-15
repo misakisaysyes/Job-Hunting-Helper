@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { applyFullSettings, getFullSettings, saveFullSettings } from "../../api/settings";
-import { DISABLED_AI_SCORE_NOTICE, FIELD_HELP, FIELD_LABELS, FIELD_OPTIONS, RESTART_FIELDS } from "./configFields";
+import { DISABLED_AI_SCORE_NOTICE, FIELD_HELP, FIELD_LABELS, FIELD_OPTIONS, PROFILE_MULTI_OPTIONS, RESTART_FIELDS } from "./configFields";
 import { CONFIG_SECTIONS } from "./configLayout";
 import TagInput from "../../components/TagInput";
 import ResumeUploadField from "./ResumeUploadField";
 import CityMultiSelect from "./CityMultiSelect";
+import ChoiceMultiSelect from "./ChoiceMultiSelect";
 import FollowupTypeMultiSelect from "./FollowupTypeMultiSelect";
 import "./config.css";
 
@@ -124,8 +125,8 @@ export default function ConfigurationPage() {
   const [draft, setDraft] = useState(null);
   const [cityOptions, setCityOptions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [applyBlocked, setApplyBlocked] = useState(false);
   const [pendingApply, setPendingApply] = useState(false);
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
@@ -174,24 +175,11 @@ export default function ConfigurationPage() {
     return result;
   }
 
-  async function save(event) {
+  async function apply(event) {
     event.preventDefault();
     if (uploadingResume || applying) return;
-    setSaving(true);
-    setNotice(null);
-    try {
-      await persistSettings();
-      setNotice({ type: "success", text: "配置已保存。点击「生效配置」后，下一轮任务将使用新配置。" });
-    } catch (cause) {
-      setNotice({ type: "error", text: cause.message || "保存配置失败" });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function apply() {
-    if (saving || uploadingResume || applying) return;
     setApplying(true);
+    setApplyBlocked(false);
     setNotice(null);
     try {
       if (dirty) await persistSettings();
@@ -207,7 +195,12 @@ export default function ConfigurationPage() {
         setNotice({ type: "success", text: "配置已生效。下一轮任务将使用新配置。" });
       }
     } catch (cause) {
-      setNotice({ type: "error", text: cause.message || "生效配置失败" });
+      if (cause.code === "active_task_blocks_settings_apply") {
+        setPendingApply(true);
+        setApplyBlocked(true);
+      } else {
+        setNotice({ type: "error", text: cause.message || "生效配置失败" });
+      }
     } finally {
       setApplying(false);
     }
@@ -239,13 +232,21 @@ export default function ConfigurationPage() {
           value={apiKeyInput} placeholder={apiKeyConfigured ? "已保存；输入新 Key 可替换" : "输入 API Key"}
           onChange={(event) => { setApiKeyInput(event.target.value); setDirty(true); setNotice(null); }} />
         <p>{apiKeyConfigured ? "Key 已保存在本项目的 .config.credentials.yaml，页面不会显示原文。留空表示保持原值。"
-          : "填写后保存到本项目的 .config.credentials.yaml，再点击生效配置；也可以继续使用环境变量。"}</p>
+          : "点击生效配置后保存到本项目的 .config.credentials.yaml；也可以继续使用环境变量。"}</p>
       </div>;
     }
     const original = path === "browser.silent_background" ? false : settings[section][name];
     if (path === "collection.cities") {
       return <CityMultiSelect key={path} options={cityOptions} values={draft.collection.cities}
         onChange={(value) => update(section, name, value)} />;
+    }
+    if (PROFILE_MULTI_OPTIONS[path]) {
+      const label = FIELD_LABELS[section][name];
+      return <ChoiceMultiSelect key={path} id={`config-${section}-${name}`}
+        label={label} path={path} options={PROFILE_MULTI_OPTIONS[path]}
+        values={draft[section][name]} onChange={(value) => update(section, name, value)}
+        emptyText={`选择${label}（不限）`} help={FIELD_HELP[path]}
+        optionsClassName="config-profile-options" />;
     }
     return section === "profile" && name === "resume_path"
       ? <ResumeUploadField key={path} currentPath={draft.profile.resume_path}
@@ -270,20 +271,17 @@ export default function ConfigurationPage() {
       <p className="eyebrow">SETTINGS</p>
       <h1>配置</h1>
     </header>
-    {loading ? <p>正在读取配置…</p> : !draft ? null : <form onSubmit={save}>
+    {loading ? <p>正在读取配置…</p> : !draft ? null : <form onSubmit={apply}>
       <div className="config-actions">
         <div className="config-actions-copy">
           <strong>{dirty ? "有未保存的修改" : pendingApply ? "已保存，待生效" : "所有修改已生效"}</strong>
-          <span>配置采集、监测和 AI 处理流程。保存时会检查配置约束并写入本地；点击生效后用于下一轮任务。需要重启时，系统会自动重启 API 服务。</span>
+          <span>配置采集、监测和 AI 处理流程。点击生效配置会先保存并检查配置约束，再用于下一轮任务；需要重启时，系统会自动重启 API 服务。</span>
           {notice && <p className={`config-action-notice ${notice.type}`} role="status">{notice.text}</p>}
         </div>
         <div className="config-actions-buttons">
-          <button type="submit" className="start-button" disabled={!dirty || saving || applying || uploadingResume}>
-            {saving ? "保存中…" : "保存配置"}
-          </button>
-          <button type="button" className="start-button config-apply-button"
-            disabled={saving || applying || uploadingResume} onClick={apply}>
-            {applying ? "生效中…" : "生效配置"}
+          <button type="submit" className="start-button"
+            disabled={applying || uploadingResume}>
+            {applying ? "保存并生效中…" : "生效配置"}
           </button>
         </div>
       </div>
@@ -336,5 +334,14 @@ export default function ConfigurationPage() {
         </div>
       </details>)}
     </form>}
+    {applyBlocked && <div className="config-apply-dialog-backdrop">
+      <section className="config-apply-dialog" role="alertdialog" aria-modal="true"
+        aria-labelledby="config-apply-dialog-title" aria-describedby="config-apply-dialog-message">
+        <h2 id="config-apply-dialog-title">配置已保存，暂未生效</h2>
+        <p id="config-apply-dialog-message">当前有任务在执行，配置无法生效，但已保存，待任务执行完后重试。</p>
+        <button type="button" className="start-button" autoFocus
+          onClick={() => setApplyBlocked(false)}>知道了</button>
+      </section>
+    </div>}
   </main>;
 }

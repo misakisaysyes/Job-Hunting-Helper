@@ -1,43 +1,56 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { currentTaskRuns, hasNewTaskCompletion, newlyCompletedRuns } from "./taskCompletion.js";
+import { claimTaskCompletion, createTaskCompletionTracker } from "./taskCompletion.js";
 
 const run = (run_id, status) => ({ run_id, status });
 
-test("ignores historical completions on initial load", () => {
-  const current = currentTaskRuns({ current: {
-    collection: run(1, "completed"), monitoring: run(2, "idle"),
-  } });
-  assert.equal(hasNewTaskCompletion(null, current), false);
-  assert.equal(hasNewTaskCompletion(current, current), false);
+test("ignores completed runs found on initial load", () => {
+  const tracker = createTaskCompletionTracker();
+  assert.equal(tracker.observe(run(1, "completed")), false);
+  assert.equal(tracker.observe(run(1, "completed")), false);
 });
 
-test("alerts once when either task finishes", () => {
-  const before = { collection: run(1, "running"), monitoring: run(2, "running") };
-  const collectionDone = { ...before, collection: run(1, "completed_with_shortage") };
-  const bothDone = { collection: collectionDone.collection, monitoring: run(2, "completed") };
-  assert.equal(hasNewTaskCompletion(before, collectionDone), true);
-  assert.equal(hasNewTaskCompletion(collectionDone, bothDone), true);
-  assert.equal(hasNewTaskCompletion(bothDone, bothDone), false);
+test("alerts exactly once when an observed run finishes", () => {
+  const tracker = createTaskCompletionTracker();
+  assert.equal(tracker.observe(run(1, "running")), false);
+  assert.equal(tracker.observe(run(1, "running")), false);
+  assert.equal(tracker.observe(run(1, "completed")), true);
+  assert.equal(tracker.observe(run(1, "completed")), false);
+  assert.equal(tracker.observe(run(1, "running")), false);
+  assert.equal(tracker.observe(run(1, "completed")), false);
 });
 
-test("detects a new task that starts and finishes between polls", () => {
-  const before = { collection: run(1, "completed"), monitoring: null };
-  assert.equal(hasNewTaskCompletion(before, {
-    collection: run(2, "failed"), monitoring: null,
-  }), true);
+test("alerts once per new run, including failed and interrupted runs", () => {
+  const tracker = createTaskCompletionTracker();
+  assert.equal(tracker.observe(run(1, "running")), false);
+  assert.equal(tracker.observe(run(1, "failed")), true);
+  assert.equal(tracker.observe(run(2, "running")), false);
+  assert.equal(tracker.observe(run(2, "stopped")), true);
+  assert.equal(tracker.observe(run(2, "stopped")), false);
 });
 
-test("batch followup and deletion completions each alert once", () => {
-  const before = currentTaskRuns({ current: { monitoring_followup: run(4, "running") } });
-  const after = currentTaskRuns({ current: { monitoring_followup: run(4, "completed") } });
-  assert.equal(hasNewTaskCompletion(before, after), true);
-  assert.equal(hasNewTaskCompletion(after, after), false);
-  const deleted = currentTaskRuns({ current: {
-    monitoring_followup: run(4, "completed"), monitoring_delete: run(5, "completed_with_shortage"),
-  } });
-  assert.equal(hasNewTaskCompletion(after, deleted), true);
-  assert.equal(hasNewTaskCompletion(deleted, deleted), false);
-  assert.deepEqual(newlyCompletedRuns(before, after), ["monitoring_followup:4"]);
-  assert.deepEqual(newlyCompletedRuns(after, deleted), ["monitoring_delete:5"]);
+test("ignores missing IDs and stale completion responses", () => {
+  const tracker = createTaskCompletionTracker();
+  assert.equal(tracker.observe(run(1, "running")), false);
+  assert.equal(tracker.observe(run(2, "running")), false);
+  assert.equal(tracker.observe(run(1, "completed")), false);
+  assert.equal(tracker.observe({ status: "completed" }), false);
+  assert.equal(tracker.observe(run(2, "completed")), true);
+});
+
+test("only one tab claims the sound for the same completed run", async () => {
+  const values = new Map();
+  const storage = {
+    getItem: (key) => values.get(key) || null,
+    setItem: (key, value) => values.set(key, value),
+  };
+  const firstTab = createTaskCompletionTracker();
+  const secondTab = createTaskCompletionTracker();
+  firstTab.observe(run(3, "running"));
+  secondTab.observe(run(3, "running"));
+  assert.equal(firstTab.observe(run(3, "completed")), true);
+  assert.equal(secondTab.observe(run(3, "completed")), true);
+  assert.equal(await claimTaskCompletion("monitoring:3", { storage, locks: null }), true);
+  assert.equal(await claimTaskCompletion("monitoring:3", { storage, locks: null }), false);
+  assert.equal(await claimTaskCompletion("monitoring:4", { storage, locks: null }), true);
 });

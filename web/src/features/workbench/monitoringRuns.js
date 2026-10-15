@@ -7,6 +7,7 @@ export const MONITORING_PHASES = [
 export function phasesForMonitoringRun(run) {
   const phase = run?.counts?.phase;
   if (MONITORING_PHASES.some((item) => item.phase === phase)) return [phase];
+  if (phase === "conversion") return ["communicated", "exchanged"];
   // Runs from before individual phase buttons (and the legacy "all" mode)
   // scanned both top-level tabs together.
   return ["communicated", "new_greetings"];

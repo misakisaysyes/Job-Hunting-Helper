@@ -10,7 +10,12 @@ export async function requestJson(url, options) {
   } catch {
     throw new Error(`API 返回的 JSON 无法解析（HTTP ${response.status}）。`);
   }
-  if (!response.ok) throw new Error(data.error || `请求失败（${response.status}）`);
+  if (!response.ok) {
+    const error = new Error(data.error || `请求失败（${response.status}）`);
+    error.status = response.status;
+    error.code = data.code;
+    throw error;
+  }
   return data;
 }
 

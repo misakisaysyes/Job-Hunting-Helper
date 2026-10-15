@@ -31,7 +31,6 @@ export default function WorkbenchHome({ onOpenCollection, onOpenMonitoring }) {
 
   return <main className="content workbench-home">
     <header className="workbench-intro">
-      <p className="eyebrow">WORKBENCH</p>
       <h1>工作台</h1>
       <p>查看每天的采集与监测结果、执行记录及当前进度。</p>
     </header>
