@@ -329,6 +329,7 @@ button:disabled {
 .followup-availability.pending { background:#fff4e1; color:#9f6a14; }
 .followup-availability.unavailable { background:#f1f3f6; color:#66758a; }
 .followup-availability-cell small { display:block; margin-top:7px; color:#7e8da3; font-size:11px; line-height:1.5; }
+.monitoring-scan-note { display:block; margin-top:7px; color:#7e8da3; font-size:11px; line-height:1.5; }
 .monitoring-followup-card .text-button { margin-right:0; }
 .followup-modal-backdrop { position:fixed; inset:0; z-index:100; background:rgba(26,39,60,.44); display:grid; place-items:center; padding:20px; }
 .followup-modal { width:min(540px,100%); max-height:calc(100vh - 40px); overflow:auto; background:#fff; border:1px solid #dce5f0; border-radius:16px; box-shadow:0 18px 60px rgba(25,43,70,.22); padding:24px; }

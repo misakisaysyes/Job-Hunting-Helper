@@ -72,6 +72,7 @@ class ConversionTests(unittest.TestCase):
             {"source": "hr_initiated", "followed_up": False, "delivered": True, "count": 1},
         ])
         self.assertEqual(result["delivery_basis"], "confirmed_attachment_resume_exchange_first_seen")
+        self.assertEqual(result["followup_basis"], "confirmed_send_events")
         with closing(sqlite3.connect(self.path)) as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM followup_send_events").fetchone()[0], 1)
 
@@ -97,6 +98,8 @@ class ConversionTests(unittest.TestCase):
                  updated_at, last_scanned_at)
                 VALUES ('boss', 'outside', 'unread', 1, ?, ?, ?)""",
                 (last_at, last_at, last_at))
+            conn.execute("""INSERT INTO followup_send_events
+                VALUES ('boss', 'outside', '100', '', ?)""", (last_at,))
             conn.execute("""INSERT INTO monitored_exchanges
                 (platform, conversation_id, in_job_pool, first_seen_at, updated_at,
                  scan_token, resume_delivery_message_id)
@@ -139,7 +142,7 @@ class ConversionTests(unittest.TestCase):
         with closing(sqlite3.connect(self.path)) as conn:
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM followup_send_events").fetchone()[0], 2)
 
-    def test_current_statuses_and_specified_timestamps_define_each_count(self):
+    def test_followups_use_confirmed_send_time_independently_of_current_state(self):
         yesterday = (datetime.now(LOCAL_ZONE).date() - timedelta(days=1)).isoformat()
         outside = datetime.fromisoformat(f"{yesterday}T12:00:00+08:00").astimezone(timezone.utc).isoformat()
         with closing(sqlite3.connect(self.path)) as conn:
@@ -158,7 +161,9 @@ class ConversionTests(unittest.TestCase):
                 ("inactive", 0, 0, "unread", self.now, self.now, 1),
                 ("answered", 0, 1, "replied", self.now, self.now, 1),
                 ("followed", 1, 1, "read_no_reply", outside, self.now, 1),
-                ("old-followup", 1, 1, "unread", self.now, outside, 1),
+                ("rescanned", 1, 1, "unread", outside, outside, 1),
+                ("old-followup", 1, 1, "unread", outside, self.now, 1),
+                ("unconfirmed", 1, 1, "unread", self.now, self.now, 1),
             ):
                 conn.execute("""INSERT INTO monitored_conversations
                     (platform, conversation_id, in_job_pool, active, judgment,
@@ -166,6 +171,10 @@ class ConversionTests(unittest.TestCase):
                     VALUES ('boss', ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (conversation_id, in_pool, active, judgment, first_seen,
                      updated, updated, count))
+            for conversation_id in ("inactive", "answered", "followed", "rescanned", "old-followup"):
+                conn.execute("""INSERT INTO followup_send_events
+                    VALUES ('boss', ?, '100', '', ?)""",
+                    (conversation_id, outside if conversation_id == "old-followup" else self.now))
             for conversation_id, active, first_seen, confirmed in (
                 ("exchange-current", 1, self.now, False),
                 ("exchange-inactive", 0, self.now, True),
@@ -181,7 +190,51 @@ class ConversionTests(unittest.TestCase):
 
         result = get_conversion_flow(self.path, self.today, self.today)
         self.assertEqual(result["metrics"], {"greeted": 1, "hr_initiated": 2,
-                                             "followups": 2, "deliveries": 1, "contacts": 5})
+                                             "followups": 4, "deliveries": 1, "contacts": 7})
+
+    def test_rescanning_retiring_or_deleting_does_not_remove_confirmed_followup_history(self):
+        yesterday = (date.fromisoformat(self.today) - timedelta(days=1)).isoformat()
+        sent_at = datetime.fromisoformat(f"{yesterday}T23:30:00+08:00").astimezone(timezone.utc).isoformat()
+        with closing(sqlite3.connect(self.path)) as conn:
+            store = ConversationStore(conn)
+            for identity in ("rescanned", "unseen", "terminated", "deleted"):
+                conversation = {"platform": "boss", "conversation_id": identity,
+                                "source_job_id": f"job-{identity}", "judgment": "unread"}
+                store.upsert(conversation, [{"message_id": "100", "sender": "self", "text": "你好"}],
+                             scan_token="first")
+                self.assertTrue(store.prepare_followup("boss", identity, "你好", "100"))
+                self.assertIsNotNone(store.claim_followup("boss", identity, 2))
+                with patch("data.conversation_store._now", return_value=sent_at):
+                    self.assertTrue(store.finish_followup("boss", identity, outcome="sent", message_id="101"))
+            before = get_conversion_flow(self.path, yesterday, yesterday)
+            store.upsert({"platform": "boss", "conversation_id": "rescanned",
+                          "source_job_id": "job-rescanned", "judgment": "read_no_reply"}, [], scan_token="second")
+            self.assertTrue(store.terminate_monitoring("boss", "terminated"))
+            self.assertEqual(store.delete_record("boss", "deleted"), "deleted")
+            store.deactivate_unseen("second")
+        after = get_conversion_flow(self.path, yesterday, yesterday)
+        self.assertEqual(before["metrics"]["followups"], 4)
+        for key in ("metrics", "flows", "daily_metrics"):
+            self.assertEqual(after[key], before[key])
+        self.assertEqual(get_conversion_flow(self.path, self.today, self.today)["metrics"]["followups"], 0)
+
+    def test_daily_followups_use_first_confirmed_send_within_selected_range(self):
+        first = (date.fromisoformat(self.today) - timedelta(days=1)).isoformat()
+        previous = (date.fromisoformat(self.today) - timedelta(days=2)).isoformat()
+        with closing(sqlite3.connect(self.path)) as conn:
+            ConversationStore(conn)
+            for message_id, day in (("100", previous), ("101", first), ("102", self.today)):
+                sent_at = datetime.fromisoformat(f"{day}T00:30:00+08:00").astimezone(timezone.utc).isoformat()
+                conn.execute("""INSERT INTO followup_send_events
+                    VALUES ('boss', '1', ?, 'job-1', ?)""", (message_id, sent_at))
+            conn.commit()
+        result = get_conversion_flow(self.path, first, self.today)
+        self.assertEqual(result["metrics"]["followups"], 1)
+        self.assertEqual([day["followups"] for day in result["daily_metrics"]], [1, 0])
+        self.assertEqual(sum(flow["count"] for flow in result["flows"] if flow["followed_up"]), 1)
+        today_only = get_conversion_flow(self.path, self.today, self.today)
+        self.assertEqual(today_only["metrics"]["followups"], 1)
+        self.assertEqual(today_only["daily_metrics"][0]["followups"], 1)
 
     def test_conversion_endpoint_returns_range_summary(self):
         handler_class = make_handler(self.path, MagicMock(), restart_event=Event(),

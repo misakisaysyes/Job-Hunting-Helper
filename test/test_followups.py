@@ -193,6 +193,52 @@ class FollowupTests(unittest.TestCase):
             self.assertTrue(rows[0]["followup_eligible"])
             self.assertEqual(rows[0]["followup_reason"], "")
 
+    def test_unseen_history_is_unavailable_until_scanned_again(self) -> None:
+        with closing(sqlite3.connect(":memory:")) as conn:
+            store = ConversationStore(conn)
+            conversation = {"platform": "boss", "conversation_id": "123", "judgment": "unread"}
+            store.upsert(conversation, self.messages(), scan_token="first")
+            self.assertTrue(store.prepare_followup("boss", "123", self.greeting, "100"))
+            store.deactivate_unseen("second")
+            # Even a leftover legacy draft must not make historical status actionable.
+            conn.execute("""UPDATE monitored_conversations SET followup_status = 'pending_review',
+                followup_text = ? WHERE conversation_id = '123'""", (self.greeting,))
+            rows, total = list_conversations(conn, self.config, limit=10, offset=0,
+                                             followup_status="unavailable", now=self.now)
+            self.assertEqual(total, 1)
+            self.assertFalse(rows[0]["followup_eligible"])
+            self.assertEqual(rows[0]["followup_unavailable_cause"], "待扫描确认")
+            self.assertIn("本轮未扫描到", rows[0]["followup_reason"])
+            self.assertEqual(rows[0]["followup_cooldown_until"], "")
+            self.assertEqual(list_conversations(conn, self.config, limit=10, offset=0,
+                followup_status="available", now=self.now), ([], 0))
+            store.upsert(conversation, self.messages(), scan_token="third")
+            rows, total = list_conversations(conn, self.config, limit=10, offset=0,
+                                             followup_status="available", now=self.now)
+            self.assertEqual(total, 1)
+            self.assertTrue(rows[0]["followup_eligible"])
+
+    def test_historical_details_remain_readable_but_generation_and_send_are_blocked(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "state.sqlite"
+            self.prepare_review(path)
+            with closing(sqlite3.connect(path)) as conn:
+                ConversationStore(conn).deactivate_unseen("later-scan")
+            retained = get_followup(path, "boss", "123")["conversation"]
+            self.assertFalse(retained["active"])
+            self.assertFalse(retained["followup_eligible"])
+            self.assertEqual(retained["greeting_text"], self.greeting)
+            scheduler = Mock()
+            with self.assertRaisesRegex(JobActionError, "本轮未扫描到") as error:
+                generate_followup(path, DEFAULT_CONFIG, scheduler, "boss", "123", "100")
+            self.assertEqual(error.exception.status_code, 409)
+            scheduler.submit.assert_not_called()
+            with patch("api.followups.send_boss_followup") as send:
+                with self.assertRaises(JobActionError) as error:
+                    send_followup(path, "cdp", "boss", "123", text=self.greeting, anchor_id="100")
+            self.assertEqual(error.exception.status_code, 409)
+            send.assert_not_called()
+
     def test_list_cooldown_deadline_uses_latest_delivered_greeting(self) -> None:
         for milliseconds in (True, False):
             with self.subTest(milliseconds=milliseconds), closing(sqlite3.connect(":memory:")) as conn:
@@ -249,7 +295,7 @@ class FollowupTests(unittest.TestCase):
                 if status == "pending_review":
                     self.assertTrue(store.prepare_followup("boss", identity, self.greeting, "100"))
                 conn.execute("""UPDATE monitored_conversations
-                    SET followup_status = ?, followup_count = ?, updated_at = ?
+                    SET followup_status = ?, followup_count = ?, last_scanned_at = ?
                     WHERE conversation_id = ?""",
                     (status, 2 if identity == "1" else 0,
                      f"2026-10-06T12:00:0{identity}+00:00", identity))

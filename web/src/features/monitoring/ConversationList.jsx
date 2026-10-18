@@ -68,7 +68,9 @@ export default function ConversationList({ conversations, total, page, pageSize,
                   <div className="company">{display(conversation.company)} <span className="dot">·</span> {display(conversation.recruiter)}</div>
                   <div className="job-id">{display(conversation.platform)} · {display(conversation.conversation_id)} <span className="dot">·</span> {conversation.in_job_pool ? "池内" : "池外"}</div>
                 </td>
-                <td>{CONVERSATION_STATUS_LABELS[conversation.conversation_status || conversation.judgment] || display(conversation.conversation_status || conversation.judgment)}</td>
+                <td>{CONVERSATION_STATUS_LABELS[conversation.conversation_status || conversation.judgment] || display(conversation.conversation_status || conversation.judgment)}
+                  {conversation.active === false && <small className="monitoring-scan-note">本轮未扫描到<br />显示上次扫描状态</small>}
+                </td>
                 <td className="followup-availability-cell">
                   {conversation.followup_display_status === "available"
                     ? <><span className="followup-availability available">可追问</span>

@@ -128,7 +128,8 @@ def open_conversation(db_path: Path, config: dict, platform: str,
     if platform != "boss":
         raise JobActionError("当前仅支持 BOSS 会话", 400)
     with closing(sqlite3.connect(db_path, timeout=10)) as conn:
-        conversation = ConversationStore(conn).get_conversation(platform, conversation_id)
+        conversation = ConversationStore(conn).get_conversation(
+            platform, conversation_id, include_inactive=True)
     if conversation is None:
         raise JobActionError("会话不存在", 404)
     source_job_id = _conversation_job_id(conversation, "仅沟通", expected_source_job_id)

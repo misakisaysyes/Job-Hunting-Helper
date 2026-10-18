@@ -569,7 +569,7 @@ export default function MonitoringPage() {
           <div className="monitoring-workspace-pane" hidden={activePhase !== "communicated"}>
       <div className="section-heading monitoring-section-heading">
         <div><h2>「仅沟通」会话列表</h2>
-          <p>查看「仅沟通」中未读或已读未回会话的追问进展、入库和更新时间。</p></div>
+          <p>查看「仅沟通」会话的追问进展；本轮未扫描到的历史会话仍会保留，并显示上次扫描状态。</p></div>
       </div>
       {listError && <div className="error" role="alert">{listError}</div>}
       {openNotice && <div className={openNotice.type === "error" ? "error" : "notice"}

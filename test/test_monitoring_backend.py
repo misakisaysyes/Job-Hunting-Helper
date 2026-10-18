@@ -153,20 +153,46 @@ class MonitoringBackendTests(unittest.TestCase):
             limit=10, offset=0, followup_status="followed_up")
         self.assertEqual((total, rows[0]["conversation_id"]), (1, "1"))
 
-    def test_only_two_statuses_can_be_saved_and_unseen_rows_leave_scope(self) -> None:
+    def test_unseen_rows_stay_visible_and_returning_rows_keep_their_history(self) -> None:
         conversation = {"platform": "boss", "conversation_id": "123", "judgment": "unread"}
         with self.assertRaises(ValueError):
             self.store.upsert({**conversation, "judgment": "manual_review"}, [])
-        self.store.upsert(conversation, [], scan_token="first")
-        first_seen_at = self.store.get_conversation("boss", "123")["first_seen_at"]
+        self.store.upsert(conversation, [
+            {"message_id": "100", "sender": "self", "text": "你好"}], scan_token="first")
+        first = self.store.get_conversation("boss", "123")
+        self.assertTrue(self.store.prepare_followup("boss", "123", "你好", "100"))
         self.assertEqual(self.store.deactivate_unseen("second"), 1)
-        self.assertEqual(self.store.list_conversations(limit=10, offset=0)[1], 0)
+        rows, total = self.store.list_conversations(limit=10, offset=0)
+        self.assertEqual((total, rows[0]["active"], rows[0]["followup_status"]), (1, False, "stale"))
+        self.assertEqual(rows[0]["last_scanned_at"], first["last_scanned_at"])
+        self.assertEqual(rows[0]["greeting_text"], first["greeting_text"])
+        self.assertIsNone(self.store.get_conversation("boss", "123"))
+        self.assertIsNotNone(self.store.get_conversation("boss", "123", include_inactive=True))
+        self.assertFalse(self.store.prepare_followup("boss", "123", "你好", "100"))
+        self.assertIsNone(self.store.claim_followup("boss", "123", 2))
+        self.assertEqual(self.store.deactivate_unseen("third"), 0)
+        self.assertEqual(self.store.list_conversations(limit=10, offset=0)[1], 1)
         self.store.upsert({**conversation, "judgment": "read_no_reply"}, [],
                           scan_token="third")
         saved = self.store.get_conversation("boss", "123")
         self.assertEqual(saved["conversation_status"], "read_no_reply")
-        self.assertEqual(saved["first_seen_at"], first_seen_at)
+        self.assertEqual(saved["first_seen_at"], first["first_seen_at"])
         self.assertTrue(saved["active"])
+
+    def test_history_is_searchable_paginated_and_can_be_terminated_or_deleted(self) -> None:
+        for identity, scanned_at in (("1", "2026-10-01"), ("2", "2026-10-02"), ("3", "2026-10-03")):
+            with patch("data.conversation_store._now", return_value=scanned_at):
+                self.store.upsert({"platform": "boss", "conversation_id": identity,
+                                   "company": "甲公司", "judgment": "unread"}, [], scan_token=identity)
+        self.store.deactivate_unseen("3")
+        rows, total = self.store.list_conversations(limit=1, offset=1, query="甲公司",
+                                                   conversation_status="unread")
+        self.assertEqual((total, rows[0]["conversation_id"], rows[0]["active"]), (3, "2", False))
+        self.assertTrue(self.store.terminate_monitoring("boss", "2"))
+        self.assertIsNone(self.store.get_conversation("boss", "2", include_inactive=True))
+        self.assertEqual(self.store.delete_record("boss", "1"), "deleted")
+        rows, total = self.store.list_conversations(limit=10, offset=0)
+        self.assertEqual((total, rows[0]["conversation_id"]), (1, "3"))
 
     def test_scan_reads_history_only_for_two_list_receipts(self) -> None:
         friends = [
@@ -904,7 +930,7 @@ class MonitoringBackendTests(unittest.TestCase):
             self.assertEqual(phases["communicated"]["status"], "failed")
             self.assertEqual(phases["new_greetings"]["status"], "pending")
 
-    def test_legacy_reply_column_is_removed_and_old_rows_require_rescan(self) -> None:
+    def test_legacy_rows_remain_visible_and_require_rescan_for_followups(self) -> None:
         with closing(sqlite3.connect(":memory:")) as conn:
             conn.execute("""CREATE TABLE monitored_conversations (
                 platform TEXT NOT NULL, conversation_id TEXT NOT NULL,
@@ -924,7 +950,9 @@ class MonitoringBackendTests(unittest.TestCase):
             columns = {row[1] for row in conn.execute(
                 "PRAGMA table_info(monitored_conversations)")}
             self.assertNotIn("hr_reply_status", columns)
-            self.assertEqual(store.list_conversations(limit=10, offset=0)[1], 0)
+            rows, total = store.list_conversations(limit=10, offset=0)
+            self.assertEqual((total, rows[0]["active"]), (1, False))
+            self.assertIsNone(store.get_conversation("boss", "old"))
             store.upsert({"platform": "boss", "conversation_id": "old",
                           "judgment": "read_no_reply"}, [], scan_token="fresh")
             rows, total = store.list_conversations(limit=10, offset=0)
@@ -1104,7 +1132,7 @@ class MonitoringBackendTests(unittest.TestCase):
                         self.assertEqual(error.exception.status_code, 409)
                         browser.assert_not_called()
 
-    def test_monitoring_keeps_job_status_and_retires_conversation_outside_scope(self) -> None:
+    def test_monitoring_keeps_job_status_and_shows_conversation_outside_scope(self) -> None:
         with TemporaryDirectory() as directory:
             db_path = Path(directory) / "state.sqlite3"
             with closing(sqlite3.connect(db_path)) as conn:
@@ -1136,8 +1164,9 @@ class MonitoringBackendTests(unittest.TestCase):
             with closing(sqlite3.connect(db_path)) as conn:
                 self.assertEqual(JobStore(conn).get_job("boss", "job-a")["job_status"],
                                  "greeted")
-                self.assertEqual(ConversationStore(conn).list_conversations(
-                    limit=10, offset=0)[1], 0)
+                rows, total = ConversationStore(conn).list_conversations(limit=10, offset=0)
+                self.assertEqual((total, rows[0]["active"]), (1, False))
+                self.assertEqual(rows[0]["conversation_status"], "unread")
 
     def test_monitoring_keeps_identifiable_conversation_outside_pool(self) -> None:
         with TemporaryDirectory() as directory:

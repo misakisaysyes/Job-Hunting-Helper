@@ -1,4 +1,4 @@
-"""Count current jobs and conversations in the selected workbench time range."""
+"""Count dated job states, confirmed follow-ups, and conversation outcomes."""
 
 from __future__ import annotations
 
@@ -58,16 +58,23 @@ def get_conversion_flow(db_path: Path, start_date: str, end_date: str) -> dict:
             FROM monitored_exchanges
             WHERE in_job_pool = 0 AND first_seen_at >= ? AND first_seen_at < ?""",
             (lower, upper)).fetchall()
-        followed = conn.execute("""SELECT platform, conversation_id, source_job_id, updated_at
-            FROM monitored_conversations
-            WHERE judgment IN ('unread', 'read_no_reply') AND followup_count > 0
-              AND updated_at >= ? AND updated_at < ?""",
+        followup_events = conn.execute("""SELECT platform, conversation_id, source_job_id, sent_at
+            FROM followup_send_events
+            WHERE sent_at >= ? AND sent_at < ?
+            ORDER BY sent_at, platform, conversation_id, message_id""",
             (lower, upper)).fetchall()
         exchanged = conn.execute("""SELECT platform, conversation_id, source_job_id, first_seen_at
             FROM monitored_exchanges
             WHERE resume_delivery_message_id != ''
               AND first_seen_at >= ? AND first_seen_at < ?""",
             (lower, upper)).fetchall()
+
+    # A later scan or reply cannot move a confirmed send to another date.
+    # Count each conversation once, on its first send within the selected range.
+    followed_by_conversation = {}
+    for row in followup_events:
+        followed_by_conversation.setdefault((row[0], row[1]), row)
+    followed = list(followed_by_conversation.values())
 
     start_day = date.fromisoformat(start_date)
     day_count = (date.fromisoformat(end_date) - start_day).days + 1
@@ -116,6 +123,7 @@ def get_conversion_flow(db_path: Path, start_date: str, end_date: str) -> dict:
                    "delivered": delivered, "count": count}
                   for (source, followed_up, delivered), count in sorted(flows.items())],
         "basis_version": 5,
+        "followup_basis": "confirmed_send_events",
         "delivery_basis": "confirmed_attachment_resume_exchange_first_seen",
     }
 

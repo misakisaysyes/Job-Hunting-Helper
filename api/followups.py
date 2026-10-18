@@ -67,6 +67,8 @@ def proposal_with_reason(conversation: dict[str, Any], messages: list[dict[str, 
                          job: dict[str, Any] | None, config: dict, *,
                          now: datetime | None = None) -> tuple[tuple[str, str, int] | None, str]:
     """Use the scan's rules to explain why no repeat greeting can be prepared."""
+    if not conversation.get("active", True):
+        return None, "本轮未扫描到该会话，请重新扫描确认后再追问"
     if not config["followup_enabled"]:
         return None, "追问功能未开启"
     judgment = conversation.get("judgment")
@@ -166,7 +168,7 @@ def annotate_followup_availability(conn: sqlite3.Connection, conversations: list
         _, reason = proposal_with_reason(conversation, messages, job, config, now=now)
         cooldown_until = None
         latest = next((message for message in reversed(messages) if _effective(message)), None)
-        if (latest and latest.get("sender") == "self"
+        if (conversation.get("active", True) and latest and latest.get("sender") == "self"
                 and str(latest.get("delivery_status") or "") in {"1", "2"}):
             sent_at = _message_time(latest.get("sent_at"))
             if sent_at is not None:
@@ -174,7 +176,9 @@ def annotate_followup_availability(conn: sqlite3.Connection, conversations: list
                 if now <= deadline:
                     cooldown_until = deadline
         pending = conversation.get("followup_status") == "pending_review"
-        if "追问有效期" in reason or reason == "无法确认会话入库时间，不能追问":
+        if not conversation.get("active", True):
+            pass
+        elif "追问有效期" in reason or reason == "无法确认会话入库时间，不能追问":
             pass
         elif pending and int(conversation.get("followup_count") or 0) >= config["followup_max_count"]:
             reason = f"已达到最多追问 {config['followup_max_count']} 次的上限"
@@ -192,7 +196,9 @@ def annotate_followup_availability(conn: sqlite3.Connection, conversations: list
         conversation["followup_reason"] = reason
         conversation["followup_cooldown_until"] = cooldown_until.isoformat() if cooldown_until else ""
         raw_status = conversation.get("followup_status")
-        if raw_status in {"failed", "draft_failed", "unknown", "skipped"}:
+        if not conversation.get("active", True):
+            display_status = "unavailable"
+        elif raw_status in {"failed", "draft_failed", "unknown", "skipped"}:
             display_status = "incomplete"
         elif raw_status == "sending":
             display_status = "sending"
@@ -210,6 +216,7 @@ def annotate_followup_availability(conn: sqlite3.Connection, conversations: list
             display_status = "unavailable"
         conversation["followup_display_status"] = display_status
         conversation["followup_unavailable_cause"] = (
+            "待扫描确认" if not conversation.get("active", True) else
             "超追问上限" if "上限" in reason else
             "过期" if "已超过最近" in reason or "追问有效期" in reason else
             "冷冻" if cooldown_until else
@@ -249,7 +256,8 @@ def get_followup(db_path: Path, platform: str, conversation_id: str) -> dict:
     if platform != "boss":
         raise JobActionError("当前仅支持 BOSS 追问", 400)
     with closing(sqlite3.connect(db_path, timeout=10)) as conn:
-        conversation = ConversationStore(conn).get_conversation(platform, conversation_id)
+        conversation = ConversationStore(conn).get_conversation(
+            platform, conversation_id, include_inactive=True)
         if conversation is None:
             raise JobActionError("会话不存在或已退出监测", 404)
         annotate_followup_availability(conn, [conversation], MONITORING_CONFIG)
@@ -272,6 +280,8 @@ def generate_followup(db_path: Path, config: dict, scheduler: AITaskScheduler,
                       platform: str, conversation_id: str, anchor_id: str,
                       *, expected_text: str | None = None) -> dict:
     conversation = get_followup(db_path, platform, conversation_id)["conversation"]
+    if not conversation["active"]:
+        raise JobActionError(conversation["followup_reason"], 409)
     if (conversation["followup_status"] != "pending_review"
             or conversation["followup_anchor_id"] != anchor_id
             or (expected_text is not None and conversation["followup_text"] != expected_text)):

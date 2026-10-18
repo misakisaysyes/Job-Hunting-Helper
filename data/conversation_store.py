@@ -131,7 +131,7 @@ class ConversationStore:
             FROM monitored_conversations
             WHERE followup_count > 0 AND followup_last_sent_at != ''""")
         if "active" not in conversation_columns:
-            # Previously scanned rows need a fresh list check before reappearing.
+            # Retain old rows for viewing; require a fresh scan before follow-ups.
             self.conn.execute("ALTER TABLE monitored_conversations ADD COLUMN active INTEGER NOT NULL DEFAULT 0")
         if "scan_token" not in conversation_columns:
             self.conn.execute("ALTER TABLE monitored_conversations ADD COLUMN scan_token TEXT NOT NULL DEFAULT ''")
@@ -222,13 +222,13 @@ class ConversationStore:
             (platform,))}
 
     def terminate_monitoring(self, platform: str, conversation_id: str) -> bool:
-        """Retire an active conversation and invalidate its unsent follow-up."""
+        """Hide a retained conversation and invalidate its unsent follow-up."""
         cursor = self.conn.execute("""UPDATE monitored_conversations SET
             monitoring_terminated = 1, monitoring_terminated_at = ?, active = 0,
             followup_status = CASE WHEN followup_status = 'pending_review'
                 THEN 'stale' ELSE followup_status END,
             followup_text = '', updated_at = ?
-            WHERE platform = ? AND conversation_id = ? AND active = 1
+            WHERE platform = ? AND conversation_id = ?
               AND monitoring_terminated = 0 AND followup_status != 'sending'""",
             (_now(), _now(), platform, conversation_id))
         self.conn.commit()
@@ -255,7 +255,7 @@ class ConversationStore:
             raise
 
     def deactivate_unseen(self, scan_token: str) -> int:
-        """Retire rows absent from the latest successful Communication-tab scan."""
+        """Keep unseen rows visible, but invalidate their follow-up eligibility."""
         cursor = self.conn.execute("""UPDATE monitored_conversations SET
             active = 0,
             followup_status = CASE WHEN followup_status = 'pending_review'
@@ -270,7 +270,7 @@ class ConversationStore:
     def list_conversations(self, *, limit: int, offset: int, query: str = "",
                            conversation_status: str = "",
                            followup_status: str = "") -> tuple[list[dict[str, Any]], int]:
-        conditions: list[str] = ["active = 1", "monitoring_terminated = 0", "judgment IN ('unread', 'read_no_reply')"]
+        conditions: list[str] = ["monitoring_terminated = 0", "judgment IN ('unread', 'read_no_reply')"]
         params: list[str] = []
         if query.strip():
             escaped = query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -293,13 +293,14 @@ class ConversationStore:
                    "recruiter", "chat_url", "in_job_pool", "judgment", "next_action",
                    "evidence", "first_seen_at", "updated_at", "last_scanned_at",
                    "followup_count", "followup_status", "followup_text", "followup_anchor_id",
-                   "followup_last_sent_at", "followup_error")
+                   "followup_last_sent_at", "followup_error", "active")
         rows = self.conn.execute(f"""SELECT {', '.join(columns)} FROM monitored_conversations{where}
-            ORDER BY updated_at DESC, platform, conversation_id LIMIT ? OFFSET ?""",
+            ORDER BY last_scanned_at DESC, platform, conversation_id LIMIT ? OFFSET ?""",
             [*params, limit, offset]).fetchall()
         conversations = [dict(zip(columns, row)) for row in rows]
         for item in conversations:
             item["in_job_pool"] = bool(item["in_job_pool"])
+            item["active"] = bool(item["active"])
             item["conversation_status"] = item["judgment"]
             item["greeting_text"] = self.original_greeting(
                 item["platform"], item["conversation_id"], item["source_job_id"])
@@ -324,17 +325,18 @@ class ConversationStore:
                 job = dict(zip(("greeting", "greeting_send_state"), row))
         return resolve_original_greeting(messages, job)
 
-    def get_conversation(self, platform: str, conversation_id: str) -> dict[str, Any] | None:
+    def get_conversation(self, platform: str, conversation_id: str, *,
+                         include_inactive: bool = False) -> dict[str, Any] | None:
         columns = ("platform", "conversation_id", "source_job_id", "job_title", "company",
                    "recruiter", "chat_url", "in_job_pool", "judgment", "next_action",
                    "evidence", "first_seen_at", "updated_at", "last_scanned_at",
                    "followup_count", "followup_status", "followup_text", "followup_anchor_id",
                    "followup_last_sent_at", "followup_error", "active")
         row = self.conn.execute(f"""SELECT {', '.join(columns)} FROM monitored_conversations
-            WHERE platform = ? AND conversation_id = ? AND active = 1
+            WHERE platform = ? AND conversation_id = ? AND (active = 1 OR ?)
               AND monitoring_terminated = 0
               AND judgment IN ('unread', 'read_no_reply')""",
-            (platform, conversation_id)).fetchone()
+            (platform, conversation_id, include_inactive)).fetchone()
         if row is None:
             return None
         result = dict(zip(columns, row))
