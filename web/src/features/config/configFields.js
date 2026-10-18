@@ -54,8 +54,8 @@ export const DISABLED_AI_SCORE_NOTICE =
 
 export const FIELD_HELP = {
   "browser.silent_background": "开启后，采集、监测和批量操作会复用一个后台 BOSS 工作标签页，不切换当前页面，也不移动系统鼠标。点击“打开岗位/会话”等主动查看操作仍会显示对应页面。需要先启动并登录支持远程调试的 Chrome。",
-  "collection.encrypt_expect_id": "推荐流必填；输入 ID 后按空格添加。搜索流须留空。",
-  "collection.keywords": "搜索流必填；输入关键词后按空格添加。推荐流须留空。",
+  "collection.encrypt_expect_id": "推荐流及组合采集必填；输入 ID 后按空格添加。仅搜索流时须留空。",
+  "collection.keywords": "搜索流及组合采集必填；输入关键词后按空格添加。仅推荐流时须留空。",
   "collection.target_jobs": "达到预筛通过数后停止；启用 AI 评分时，须同时达到评分门槛。",
   "collection.max_pages": "每轮每个期望 ID 或城市与关键词组合最多读取的页数。",
   "collection.cities": "可多选；不选则按 BOSS 当前会话的城市搜索，城市编码自动匹配。",
@@ -87,7 +87,7 @@ export const FIELD_HELP = {
 
 export const FIELD_OPTIONS = {
   "collection.platform": [["boss", "BOSS"]],
-  "collection.mode": [["recommend", "推荐流"], ["search", "搜索流"]],
+  "collection.mode": [["recommend", "推荐流"], ["search", "搜索流"], ["both", "推荐流 + 搜索流"]],
   "collection.sort": [["default", "默认"], ["newest", "最新"]],
   "ai.thinking": [["auto", "自动"], ["enabled", "开启"], ["disabled", "关闭"]],
 };

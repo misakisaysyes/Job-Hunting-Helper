@@ -548,6 +548,8 @@
   overflow: auto;
 }
 
+.workbench-run-pagination { min-height: 0; padding: 10px 0 0; }
+
 .workbench-run-entry {
   padding: 12px 0;
   border-top: 1px solid #edf0f4;

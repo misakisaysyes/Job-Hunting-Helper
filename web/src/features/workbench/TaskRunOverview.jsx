@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { ScanTaskMetrics } from "../monitoring/MonitoringTaskMetrics";
 import { MONITORING_PHASES } from "./monitoringRuns";
+import { PAGE_SIZE } from "../../lib/pagination";
 
 const RUN_LABELS = {
   running: "执行中", completed: "已完成", completed_with_shortage: "部分完成",
@@ -46,8 +48,12 @@ function monitoringRunLabel(run) {
 }
 
 function RunEntries({ type, history, historical, phase }) {
-  return <div className="workbench-run-history">
-    {history.map((run) => <div className="workbench-run-entry" key={run.id}>
+  const [page, setPage] = useState(0);
+  const currentPage = Math.min(page, Math.max(0, Math.ceil(history.length / PAGE_SIZE) - 1));
+  const start = currentPage * PAGE_SIZE;
+  return <>
+    <div className="workbench-run-history">
+    {history.slice(start, start + PAGE_SIZE).map((run) => <div className="workbench-run-entry" key={run.id}>
       <div className="workbench-run-entry-head">
         <span>{type === "monitoring" && <><strong className="workbench-run-entry-phase">
           {monitoringRunLabel(run)}</strong> · </>}{formatTime(run.started_at, historical)} 开始
@@ -57,10 +63,18 @@ function RunEntries({ type, history, historical, phase }) {
       <p>{run.message || "—"}</p>
       {Object.keys(run.counts || {}).length > 0 && <Metrics type={type} counts={run.counts} phase={phase} />}
     </div>)}
-  </div>;
+    </div>
+    {history.length > PAGE_SIZE && <div className="pagination workbench-run-pagination">
+      <span>显示 {start + 1}–{Math.min(history.length, start + PAGE_SIZE)} / {history.length}</span>
+      <div><button type="button" onClick={() => setPage(currentPage - 1)} disabled={currentPage === 0}>上一页</button>
+        <span>第 {currentPage + 1} 页</span>
+        <button type="button" onClick={() => setPage(currentPage + 1)}
+          disabled={start + PAGE_SIZE >= history.length}>下一页</button></div>
+    </div>}
+  </>;
 }
 
-function RunCard({ type, title, bucket, current, active, onOpen, historical = false }) {
+function RunCard({ type, title, bucket, current, active, onOpen, historical = false, day }) {
   const history = bucket?.history || [];
   const dayLabel = historical ? "当日" : "今日";
   return <article className="workbench-run-card">
@@ -84,7 +98,7 @@ function RunCard({ type, title, bucket, current, active, onOpen, historical = fa
       <h4>执行记录</h4>
       {onOpen && <button type="button" onClick={onOpen}>查看{title}</button>}
     </div>
-    {history.length ? <RunEntries type={type} history={history} historical={historical} />
+    {history.length ? <RunEntries key={day} type={type} history={history} historical={historical} />
       : <p className="workbench-run-empty">{historical ? "当日没有执行记录。" : "今天还没有执行记录。"}</p>}
   </article>;
 }
@@ -92,14 +106,14 @@ function RunCard({ type, title, bucket, current, active, onOpen, historical = fa
 function MonitoringRunCard({ data, historical, onOpen }) {
   return <RunCard type="monitoring" title="监测任务" bucket={data?.monitoring}
     current={data?.current?.monitoring} active={data?.active?.monitoring}
-    onOpen={onOpen} historical={historical} />;
+    onOpen={onOpen} historical={historical} day={data?.date} />;
 }
 
 export function TaskRunCards({ data, historical = false, onOpenCollection, onOpenMonitoring }) {
   return <div className="workbench-run-grid">
     <RunCard type="collection" title="采集任务" bucket={data?.collection}
       current={data?.current?.collection} active={data?.active?.collection}
-      onOpen={onOpenCollection} historical={historical} />
+      onOpen={onOpenCollection} historical={historical} day={data?.date} />
     <MonitoringRunCard data={data} historical={historical} onOpen={onOpenMonitoring} />
   </div>;
 }

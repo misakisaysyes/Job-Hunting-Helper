@@ -63,6 +63,8 @@ function toPayload(draft, settings) {
   }
   if (payload.collection.mode === "search") {
     payload.collection.encrypt_expect_id = [];
+  }
+  if (payload.collection.mode === "search" || payload.collection.mode === "both") {
     payload.collection.city = "";
     payload.collection.city_code = "";
   }

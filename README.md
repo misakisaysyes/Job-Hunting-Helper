@@ -1,4 +1,6 @@
-# job-hunting-helper 采集器
+# Job Hunting Helper
+
+一个本地运行的 BOSS 求职工作台：把岗位采集与筛选、AI 辅助评估、沟通跟进和结果复盘放在同一处。第一次了解项目，可以先看[简明项目介绍](docs/项目介绍.md)；准备演示时可参考[视频演示脚本](docs/视频演示脚本.md)和[录屏清单](docs/视频录制清单.md)。
 
 ## 现有模块结构
 
@@ -122,7 +124,7 @@ HR检阅状态只包含「未读」和「已读未回」，不再分类 HR 回�
 
 1. 启动带 CDP 调试端口 `9222` 的 Chrome，并在其中登录 BOSS。
 2. 安装依赖：`python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`。
-3. 默认用 `--mode recommend` 或 `--mode search` 选择抓取模式；也可在 `config.py` 设置 `collection.mode`。
+3. 用 `--mode recommend`、`--mode search` 或 `--mode both` 选择抓取模式；也可在 `config.py` 设置 `collection.mode`。
 
 采集平台由 `config.py` 的 `collection.platform` 配置，默认 `boss`；当前只接入 BOSS，也可显式传 `--platform boss`。
 
@@ -142,6 +144,8 @@ Query String Parameters 中读取 `encryptExpectId`。
 
 搜索流使用 `POST /wapi/zpgeek/search/joblist.json`，需要至少一个搜索词，可在配置中设置或通过 `--keyword` 覆盖，
 不使用 `--encrypt-expect-id`。搜索接口的表单中虽然有同名字段，但保持为空。
+
+组合模式 `both` 同时需要推荐流期望 ID 与搜索词。每轮先读取全部推荐流来源组合，再读取搜索流来源组合；目标未达时按相同顺序进入下一轮，直到达到目标或整轮没有新岗位。两种来源共用本轮目标、岗位去重、访问额度与风控锁。首次在推荐流达到目标时，仍会至少读取一页搜索流；触及安全额度或风控时立即停止。岗位按实际发现来源记录为推荐流或搜索流。
 
 ```bash
 .venv/bin/python cli/cli.py --mode search --keyword 前端 \
@@ -245,7 +249,7 @@ Cookie 和会话请求头由 Chrome 处理，不需要写入配置文件或命�
 预筛通过的岗位会写入 `safety.state_db` 指定的 SQLite 数据库 `collected_jobs` 表。
 启用 AI 评分时，在评分完成后连同分数、理由或失败状态一起保存；未启用评分时保存岗位本身。
 本轮目标采集数统计预筛通过的岗位；启用 AI 评分时只统计达到评分门槛的岗位。
-推荐流按求职期望 ID 顺序、搜索流按随机排列的城市与关键词组合轮询，每个来源每轮最多读取 `max_pages` 页。
+推荐流按随机排列的求职期望 ID、搜索流按随机排列的城市与关键词组合轮询，每个来源每轮最多读取 `max_pages` 页。
 达到目标即停止；整轮未发现新岗位或触及安全额度时结束并报告目标未达成。
 下一次运行会按平台和岗位 ID 跳过已保存的岗位，不再打开详情页或重复评分。
 

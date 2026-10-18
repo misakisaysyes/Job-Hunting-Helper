@@ -190,12 +190,9 @@ button:disabled {
 .monitoring-workspace-nav button.active { border-color:#bdd8f7; background:#fff; box-shadow:0 2px 8px #294c7712; color:#1978e6; }
 .monitoring-workspace-nav button:focus-visible { outline:2px solid #1978e6; outline-offset:2px; }
 .monitoring-workspace-content { min-width:0; padding:18px 20px 24px; }
-.monitoring-list-panel { min-width:0; min-height:320px; margin-bottom:20px; padding:20px; border:1px solid #e3e9f1; border-radius:12px; background:#fff; }
+.monitoring-list-panel { min-width:0; min-height:320px; margin-bottom:20px; }
 .monitoring-workspace-pane[hidden] { display:none; }
-.monitoring-list-panel .section-heading { margin:0 0 18px; }
-.monitoring-list-panel .panel { border:0; border-radius:0; box-shadow:none; }
-.monitoring-list-panel .panel-head { padding-inline:0; }
-.monitoring-list-panel .monitoring-batch-toolbar { padding-inline:0; }
+.monitoring-list-panel .section-heading { margin:0 0 20px; }
 .monitoring-phase { display:flex; flex-direction:column; min-width:0; padding:15px 17px; border:1px solid #e3e9f1; border-radius:11px; background:#fbfcfe; }
 .monitoring-phase-head { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
 .monitoring-phase-actions { display:flex; align-items:center; gap:12px; }
@@ -217,7 +214,6 @@ button:disabled {
   .monitoring-workspace-nav { flex-direction:row; overflow-x:auto; border-right:0; border-bottom:1px solid #e6ebf2; border-radius:11px 11px 0 0; }
   .monitoring-workspace-nav button { flex:1 0 auto; width:auto; text-align:center; }
   .monitoring-workspace-content { padding:16px 14px 20px; }
-  .monitoring-list-panel { padding:16px 14px 20px; }
 }
 
 .monitoring-section-heading {
@@ -307,7 +303,16 @@ button:disabled {
 .monitoring-batch-table td:nth-child(3),
 .monitoring-batch-table td:nth-child(4),
 .monitoring-batch-table td:nth-child(5) { color:#617188; overflow-wrap:anywhere; }
-.monitoring-batch-toolbar { display:flex; justify-content:flex-end; gap:8px; padding:10px 22px; border-bottom:1px solid #eef1f5; }
+.monitoring-list-toolbar .monitoring-filters { display:flex; flex:1 1 580px; flex-wrap:wrap; min-width:0; gap:10px; margin:0; }
+.monitoring-list-toolbar .monitoring-filters input { flex:1 1 240px; min-width:190px; grid-column:auto; }
+.monitoring-list-toolbar .monitoring-select { flex:0 1 220px; min-width:145px; }
+.monitoring-list-toolbar .monitoring-filters input,
+.monitoring-list-toolbar .monitoring-filters select { height:36px; min-height:36px; border-color:#dce2ea; border-radius:7px; font-size:12px; }
+@media (max-width:650px) {
+  .monitoring-list-toolbar { padding:13px 16px; }
+  .monitoring-list-toolbar .monitoring-filters { flex-basis:100%; }
+  .monitoring-list-toolbar .monitoring-select { flex:1 1 145px; }
+}
 .monitoring-batch-preview { width:min(680px, 100%); }
 .monitoring-batch-preview-list { display:grid; gap:10px; margin:20px 0; max-height:50vh; overflow:auto; }
 .monitoring-batch-preview-list > div { border:1px solid #dce5f0; border-radius:10px; padding:13px 16px; }

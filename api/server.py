@@ -535,27 +535,32 @@ def make_handler(db_path: Path, scheduler: AITaskScheduler, *,
                     self.send_json(400, {"error": "缺少平台或会话 ID"})
                     return
                 self.action_result(lambda: conversation_actions.open_conversation(
-                    db_path, DEFAULT_CONFIG, platform, conversation_id))
+                    db_path, DEFAULT_CONFIG, platform, conversation_id,
+                    expected_source_job_id=body.get("source_job_id")))
                 return
             if len(parts) == 6 and parts[:3] == ["", "api", "filter-candidates"] and parts[5] == "open":
-                if self.read_json() is None:
+                body = self.read_json()
+                if body is None:
                     return
                 platform, conversation_id = unquote(parts[3]), unquote(parts[4])
                 if not platform or not conversation_id or "/" in platform or "/" in conversation_id:
                     self.send_json(400, {"error": "缺少平台或会话 ID"})
                     return
                 self.action_result(lambda: conversation_actions.open_filter_candidate(
-                    db_path, DEFAULT_CONFIG, platform, conversation_id))
+                    db_path, DEFAULT_CONFIG, platform, conversation_id,
+                    expected_source_job_id=body.get("source_job_id")))
                 return
             if len(parts) == 6 and parts[:3] == ["", "api", "exchanged-conversations"] and parts[5] == "open":
-                if self.read_json() is None:
+                body = self.read_json()
+                if body is None:
                     return
                 platform, conversation_id = unquote(parts[3]), unquote(parts[4])
                 if not platform or not conversation_id or "/" in platform or "/" in conversation_id:
                     self.send_json(400, {"error": "缺少平台或会话 ID"})
                     return
                 self.action_result(lambda: conversation_actions.open_exchanged_conversation(
-                    db_path, DEFAULT_CONFIG, platform, conversation_id))
+                    db_path, DEFAULT_CONFIG, platform, conversation_id,
+                    expected_source_job_id=body.get("source_job_id")))
                 return
             route = self.job_action_route()
             if route is None:

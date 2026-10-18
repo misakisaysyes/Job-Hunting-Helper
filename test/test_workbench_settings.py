@@ -16,6 +16,7 @@ class WorkbenchSettingsTests(unittest.TestCase):
         self.path = Path(self.temp.name) / "user-config.json"
         self.original_default = deepcopy(DEFAULT_CONFIG)
         DEFAULT_CONFIG["collection"]["encrypt_expect_id"] = ["test-id"]
+        DEFAULT_CONFIG["browser"]["silent_background"] = False
         self.saved_default = deepcopy(DEFAULT_CONFIG)
         self.saved_monitoring = deepcopy(MONITORING_CONFIG)
         self.path_patch = patch("api.settings.USER_CONFIG_PATH", self.path)
@@ -46,6 +47,15 @@ class WorkbenchSettingsTests(unittest.TestCase):
                                                 "encrypt_expect_id": []}})
         self.assertFalse(self.path.exists())
         self.assertEqual(DEFAULT_CONFIG["collection"], self.saved_default["collection"])
+
+    def test_combined_mode_saves_both_sources(self):
+        result = save_basic_settings({"collection": {
+            "mode": "both", "encrypt_expect_id": ["test-id"], "keywords": ["前端"],
+        }})
+        self.assertEqual(result["settings"]["collection"]["mode"], "both")
+        self.assertEqual(result["settings"]["collection"]["encrypt_expect_id"], ["test-id"])
+        self.assertEqual(result["settings"]["collection"]["keywords"], ["前端"])
+        self.assertEqual(json.loads(self.path.read_text())["collection"]["mode"], "both")
 
     def test_followup_valid_days_can_be_saved_with_bounds(self):
         result = save_full_settings({"monitoring": {"followup_valid_days": 14}})

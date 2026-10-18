@@ -127,8 +127,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="从已登录的 Chrome 采集 BOSS 岗位")
     parser.add_argument("--platform", choices=["boss"],
                         help="采集平台；当前支持 boss，默认从 config.py 读取")
-    parser.add_argument("--mode", choices=["recommend", "search"],
-                        help="推荐流 recommend 或搜索流 search；可在 config.py 设置默认值")
+    parser.add_argument("--mode", choices=["recommend", "search", "both"],
+                        help="推荐流 recommend、搜索流 search 或两者 both；可在 config.py 设置默认值")
     parser.add_argument("--encrypt-expect-id", action="append", type=parse_expect_ids,
                         metavar="ID[,ID...]", help="推荐流求职期望 ID；英文逗号分隔或重复指定，搜索流不使用")
     parser.add_argument("--test-prefilter", "--test", action=argparse.BooleanOptionalAction,

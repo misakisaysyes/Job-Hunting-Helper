@@ -58,9 +58,10 @@ export default function CollectionTimelinePreview({ settings, preview }) {
   const limit = preview.collection.target_jobs;
   const scoreOn = Boolean(ai.use_ai_score);
   const greetingOn = Boolean(ai.use_ai_greeting);
-  const source = collection.mode === "recommend"
-    ? `推荐流 · ${collection.encrypt_expect_id.length} 组期望`
-    : `搜索流 · ${collection.keywords.length} 个关键词`;
+  const recommendSource = `推荐流 · ${collection.encrypt_expect_id.length} 组期望`;
+  const searchSource = `搜索流 · ${collection.keywords.length} 个关键词`;
+  const source = collection.mode === "both" ? `${recommendSource} + ${searchSource}`
+    : collection.mode === "recommend" ? recommendSource : searchSource;
   const summary = [
     source,
     `每组最多 ${preview.collection.max_pages} 页`,

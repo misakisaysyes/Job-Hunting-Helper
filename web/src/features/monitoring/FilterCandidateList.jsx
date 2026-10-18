@@ -16,12 +16,12 @@ const STATUS = {
 };
 
 export default function FilterCandidateList({ candidates, total, page, pageSize, loading,
-  onPage, onAction, onOpen, onDelete, openingCandidate, busy, busyDelete, filtered, batch, onBatchModeChange }) {
+  onPage, onAction, onOpen, onDelete, openingCandidate, busy, busyDelete, filtered, batch, onBatchModeChange, toolbar }) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min(total, (page + 1) * pageSize);
   return <section className="panel" aria-label="「新招呼」会话列表中的过滤候选">
-    <div className="panel-head"><span>过滤候选</span><span className="range">{total ? `${start}–${end} / ${total}` : "暂无记录"}</span></div>
-    <div className="monitoring-batch-toolbar"><button type="button" className="toolbar-button"
+    <div className="panel-head"><span>过滤候选</span><span className="range">{`${start}–${end} / ${total}`}</span></div>
+    <div className="job-toolbar monitoring-list-toolbar">{toolbar}<button type="button" className="toolbar-button"
       disabled={loading || Boolean(batch.busy) || Boolean(busy)}
       onClick={() => onBatchModeChange(!batch.batchMode)}>
       {batch.batchMode ? "退出批量操作" : "批量操作"}
@@ -60,7 +60,8 @@ export default function FilterCandidateList({ candidates, total, page, pageSize,
                 </button>
               </>}
               <button className="text-button" type="button" onClick={() => onOpen(candidate)}
-                disabled={Boolean(openingCandidate || busy || batch.busy) || candidate.status === "deleted"}>
+                disabled={Boolean(openingCandidate || busy || batch.busy)
+                  || ["deleted", "stale", "deleting"].includes(candidate.status)}>
                 {openingCandidate === key ? "打开中…" : "查看会话"}
               </button>
               <button className="text-button filter-delete-action" type="button" disabled={Boolean(busy || batch.busy)}

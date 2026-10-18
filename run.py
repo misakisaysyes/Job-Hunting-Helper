@@ -54,8 +54,8 @@ def validate_run_config(config: dict[str, Any]) -> dict[str, Any]:
     if any(value not in {"experienced", "campus", "internship"}
            for value in profile["recruitment_types"]):
         raise ValueError("profile.recruitment_types 只能包含 experienced、campus、internship")
-    if collection["mode"] not in {"recommend", "search"}:
-        raise ValueError("需要通过 --mode 或 config.py 的 collection.mode 指定 recommend 或 search")
+    if collection["mode"] not in {"recommend", "search", "both"}:
+        raise ValueError("需要通过 --mode 或 config.py 的 collection.mode 指定 recommend、search 或 both")
     if collection["sort"] not in {"default", "newest"}:
         raise ValueError("collection.sort 只能是 default 或 newest")
     if collection["mode"] == "search" and not collection["keywords"]:
@@ -66,6 +66,10 @@ def validate_run_config(config: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("--mode recommend 不接受 --keyword；请使用 --mode search")
     if collection["mode"] == "recommend" and not collection["encrypt_expect_id"]:
         raise ValueError("--mode recommend 需要非空的 --encrypt-expect-id")
+    if collection["mode"] == "both" and not collection["encrypt_expect_id"]:
+        raise ValueError("--mode both 需要非空的 --encrypt-expect-id")
+    if collection["mode"] == "both" and not collection["keywords"]:
+        raise ValueError("--mode both 需要至少一个 --keyword")
     cities = collection["cities"]
     invalid_cities = [city for city in cities if not isinstance(city, str) or city not in CITY_CODES]
     if invalid_cities:

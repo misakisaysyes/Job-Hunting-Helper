@@ -11,7 +11,7 @@ from threading import Event
 from browser.boss_monitor import (CHAT_URL, RESUME_DELIVERED, RESUME_VIEWED, _resume_delivery_evidence,
                                   _tab_friends, scan_exchanged_conversations,
                                   scan_new_greetings, scan_recent_conversations)
-from browser.browser import ChromeBrowser
+from browser.browser import ChromeBrowser, ConversationLocationError
 from browser.boss_filter import FilterDeleteResult
 from api.conversations import (delete_conversation_record, delete_exchanged_conversation,
                                open_conversation, open_exchanged_conversation,
@@ -684,7 +684,7 @@ class MonitoringBackendTests(unittest.TestCase):
                 self.assertEqual(open_exchanged_conversation(
                     path, {"browser": {"cdp_url": "cdp"}}, "boss", "outside"), {"message": "已打开"})
                 show.assert_called_once_with({"browser": {"cdp_url": "cdp"}}, "outside",
-                                             "有交换", open_chat=True)
+                                             "有交换", open_chat=True, source_job_id="job-b")
             with patch("api.conversations.delete_boss_exchange", return_value=FilterDeleteResult(
                     True, False, "已从 BOSS 删除")) as browser_delete:
                 self.assertTrue(delete_exchanged_conversation(
@@ -747,6 +747,60 @@ class MonitoringBackendTests(unittest.TestCase):
             self.assertEqual(error.exception.status_code, 409)
             with closing(sqlite3.connect(path)) as conn:
                 self.assertIsNotNone(ExchangeStore(conn).get_conversation("boss", "123"))
+
+    def test_exchange_open_checks_selected_job_and_returns_location_errors(self) -> None:
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "state.sqlite3"
+            with closing(sqlite3.connect(db_path)) as conn:
+                ExchangeStore(conn).record_scan({
+                    "platform": "boss", "conversation_id": "123", "source_job_id": "job-new",
+                    "company": "甲公司", "recruiter": "李女士", "job_title": "前端",
+                    "last_ts": 123, "in_job_pool": False,
+                }, "scan")
+            handler_class = make_handler(db_path, MagicMock(), restart_event=Event(),
+                started_ai_concurrency=1, state_db_overridden=True, server_instance_id="test")
+            handler = object.__new__(handler_class)
+            handler.send_json = MagicMock()
+            handler.read_json = MagicMock()
+            handler.path = "/api/exchanged-conversations/boss/123/open"
+            with patch("api.conversations.ChromeBrowser") as browser:
+                for selected, status, message in (("job-old", 409, "关联岗位已更新"),
+                                                   (123, 400, "岗位标识须为文本")):
+                    with self.subTest(selected=selected):
+                        handler.read_json.return_value = {"source_job_id": selected}
+                        handler.do_POST()
+                        code, response = handler.send_json.call_args.args
+                        self.assertEqual(code, status)
+                        self.assertIn(message, response["error"])
+                        browser.assert_not_called()
+                handler.read_json.return_value = {"source_job_id": "job-new"}
+                browser.return_value.open_user_conversation.return_value = True
+                handler.do_POST()
+                self.assertEqual(handler.send_json.call_args.args[0], 200)
+                browser.return_value.open_user_conversation.assert_called_once_with(
+                    "https://www.zhipin.com/web/geek/chat", "123", "有交换", source_job_id="job-new")
+                browser.return_value.open_user_conversation.side_effect = ConversationLocationError(
+                    "岗位已变化，请重新扫描「有交换」")
+                handler.do_POST()
+                code, response = handler.send_json.call_args.args
+                self.assertEqual(code, 409)
+                self.assertIn("重新扫描「有交换」", response["error"])
+                self.assertEqual(browser.return_value.close.call_count, 2)
+
+    def test_exchange_open_without_job_id_requires_rescan_before_opening_browser(self) -> None:
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "state.sqlite3"
+            with closing(sqlite3.connect(db_path)) as conn:
+                ExchangeStore(conn).record_scan({
+                    "platform": "boss", "conversation_id": "123", "source_job_id": "",
+                    "company": "甲公司", "recruiter": "李女士", "job_title": "前端",
+                    "last_ts": 123, "in_job_pool": False,
+                }, "scan")
+            with patch("api.conversations.ChromeBrowser") as browser:
+                with self.assertRaisesRegex(JobActionError, "重新扫描「有交换」") as error:
+                    open_exchanged_conversation(db_path, {"browser": {"cdp_url": "cdp"}}, "boss", "123")
+                self.assertEqual(error.exception.status_code, 409)
+                browser.assert_not_called()
 
     def test_communicated_scan_does_not_scan_or_retire_new_greetings(self) -> None:
         with TemporaryDirectory() as directory:
@@ -882,6 +936,7 @@ class MonitoringBackendTests(unittest.TestCase):
             with closing(sqlite3.connect(db_path)) as conn:
                 store = ConversationStore(conn)
                 store.upsert({"platform": "boss", "conversation_id": "123",
+                              "source_job_id": "job-a",
                               "judgment": "unread",
                               "chat_url": "https://www.zhipin.com/web/geek/chat?jobId=456"}, [])
             with patch("api.conversations.ChromeBrowser") as browser:
@@ -892,7 +947,8 @@ class MonitoringBackendTests(unittest.TestCase):
                 self.assertIn("打开", response["message"])
                 browser.assert_called_once_with("cdp")
                 browser.return_value.open_user_conversation.assert_called_once_with(
-                    "https://www.zhipin.com/web/geek/chat", "123", "仅沟通")
+                    "https://www.zhipin.com/web/geek/chat", "123", "仅沟通",
+                    source_job_id="job-a")
                 browser.return_value.locate_user_conversation.assert_not_called()
                 browser.return_value.close.assert_called_once()
                 with self.assertRaises(JobActionError):
@@ -904,6 +960,7 @@ class MonitoringBackendTests(unittest.TestCase):
             db_path = Path(directory) / "state.sqlite3"
             with closing(sqlite3.connect(db_path)) as conn:
                 ConversationStore(conn).upsert({"platform": "boss", "conversation_id": "123",
+                                               "source_job_id": "job-a",
                                                "judgment": "unread"}, [])
             with patch("api.conversations.ChromeBrowser") as browser:
                 browser.return_value.open_user_conversation.return_value = False
@@ -911,6 +968,57 @@ class MonitoringBackendTests(unittest.TestCase):
                     open_conversation(db_path, {"browser": {"cdp_url": "cdp"}}, "boss", "123")
                 self.assertEqual(error.exception.status_code, 409)
                 browser.return_value.close.assert_called_once()
+
+    def test_open_conversation_requires_a_job_id_before_opening_browser(self) -> None:
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "state.sqlite3"
+            with closing(sqlite3.connect(db_path)) as conn:
+                ConversationStore(conn).upsert({"platform": "boss", "conversation_id": "123",
+                                               "judgment": "unread"}, [])
+            with patch("api.conversations.ChromeBrowser") as browser:
+                with self.assertRaisesRegex(JobActionError, "缺少岗位标识") as error:
+                    open_conversation(db_path, {"browser": {"cdp_url": "cdp"}}, "boss", "123")
+                self.assertEqual(error.exception.status_code, 409)
+                browser.assert_not_called()
+
+    def test_open_conversation_explains_when_the_recruiters_job_changed(self) -> None:
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "state.sqlite3"
+            with closing(sqlite3.connect(db_path)) as conn:
+                ConversationStore(conn).upsert({"platform": "boss", "conversation_id": "123",
+                                               "source_job_id": "job-a", "judgment": "unread"}, [])
+            with patch("api.conversations.ChromeBrowser") as browser:
+                browser.return_value.open_user_conversation.side_effect = ConversationLocationError(
+                    "关联岗位已变化，请重新扫描")
+                with self.assertRaisesRegex(JobActionError, "关联岗位已变化") as error:
+                    open_conversation(db_path, {"browser": {"cdp_url": "cdp"}}, "boss", "123")
+                self.assertEqual(error.exception.status_code, 409)
+                browser.return_value.close.assert_called_once()
+
+    def test_open_conversation_api_rejects_a_stale_selected_job(self) -> None:
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "state.sqlite3"
+            with closing(sqlite3.connect(db_path)) as conn:
+                ConversationStore(conn).upsert({"platform": "boss", "conversation_id": "123",
+                                               "source_job_id": "job-new", "judgment": "unread"}, [])
+            handler_class = make_handler(db_path, MagicMock(), restart_event=Event(),
+                started_ai_concurrency=1, state_db_overridden=True, server_instance_id="test")
+            handler = object.__new__(handler_class)
+            handler.send_json = MagicMock()
+            handler.read_json = MagicMock(return_value={"source_job_id": "job-old"})
+            handler.path = "/api/conversations/boss/123/open"
+            with patch("api.conversations.ChromeBrowser") as browser:
+                handler.do_POST()
+                code, response = handler.send_json.call_args.args
+                self.assertEqual(code, 409)
+                self.assertIn("关联岗位已更新", response["error"])
+                browser.assert_not_called()
+                handler.read_json.return_value = {"source_job_id": "job-new"}
+                browser.return_value.open_user_conversation.return_value = True
+                handler.do_POST()
+                self.assertEqual(handler.send_json.call_args.args[0], 200)
+                browser.return_value.open_user_conversation.assert_called_once_with(
+                    "https://www.zhipin.com/web/geek/chat", "123", "仅沟通", source_job_id="job-new")
 
     def test_locator_highlights_row_without_clicking_it(self) -> None:
         adapter = object.__new__(ChromeBrowser)
@@ -942,8 +1050,59 @@ class MonitoringBackendTests(unittest.TestCase):
                                                "boss", "123")
             self.assertIn("新招呼", result["message"])
             browser.return_value.locate_user_conversation.assert_called_once_with(
-                "123", "新招呼")
+                "123", "新招呼", source_job_id="")
             browser.return_value.open_user_conversation.assert_not_called()
+
+    def test_new_greeting_open_checks_stale_job_without_entering_chat(self) -> None:
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "state.sqlite3"
+            with closing(sqlite3.connect(db_path)) as conn:
+                FilterStore(conn).record_match({"platform": "boss", "conversation_id": "123",
+                    "company": "甲公司", "source_job_id": "job-new"}, "甲", "scan")
+            handler_class = make_handler(db_path, MagicMock(), restart_event=Event(),
+                started_ai_concurrency=1, state_db_overridden=True, server_instance_id="test")
+            handler = object.__new__(handler_class)
+            handler.send_json = MagicMock()
+            handler.read_json = MagicMock()
+            handler.path = "/api/filter-candidates/boss/123/open"
+            with patch("api.conversations.ChromeBrowser") as browser:
+                for selected, status, message in (("job-old", 409, "关联岗位已更新"),
+                                                   (123, 400, "岗位标识须为文本")):
+                    with self.subTest(selected=selected):
+                        handler.read_json.return_value = {"source_job_id": selected}
+                        handler.do_POST()
+                        code, response = handler.send_json.call_args.args
+                        self.assertEqual(code, status)
+                        self.assertIn(message, response["error"])
+                        browser.assert_not_called()
+                handler.read_json.return_value = {"source_job_id": "job-new"}
+                browser.return_value.locate_user_conversation.return_value = True
+                handler.do_POST()
+                self.assertEqual(handler.send_json.call_args.args[0], 200)
+                browser.return_value.locate_user_conversation.assert_called_once_with(
+                    "123", "新招呼", source_job_id="job-new")
+                browser.return_value.open_user_conversation.assert_not_called()
+                browser.return_value.locate_user_conversation.side_effect = ConversationLocationError(
+                    "招聘方身份不唯一")
+                handler.do_POST()
+                self.assertEqual(handler.send_json.call_args.args, (409, {"error": "招聘方身份不唯一"}))
+
+    def test_new_greeting_deleted_stale_or_deleting_record_cannot_be_located(self) -> None:
+        with TemporaryDirectory() as directory:
+            db_path = Path(directory) / "state.sqlite3"
+            with closing(sqlite3.connect(db_path)) as conn:
+                FilterStore(conn).record_match({"platform": "boss", "conversation_id": "123",
+                                                "company": "甲公司"}, "甲", "scan")
+            for status in ("deleted", "stale", "deleting"):
+                with self.subTest(status=status):
+                    with closing(sqlite3.connect(db_path)) as conn:
+                        conn.execute("UPDATE monitored_filter_candidates SET status = ?", (status,))
+                        conn.commit()
+                    with patch("api.conversations.ChromeBrowser") as browser:
+                        with self.assertRaisesRegex(JobActionError, "重新扫描「新招呼」") as error:
+                            open_filter_candidate(db_path, {"browser": {"cdp_url": "cdp"}}, "boss", "123")
+                        self.assertEqual(error.exception.status_code, 409)
+                        browser.assert_not_called()
 
     def test_monitoring_keeps_job_status_and_retires_conversation_outside_scope(self) -> None:
         with TemporaryDirectory() as directory:

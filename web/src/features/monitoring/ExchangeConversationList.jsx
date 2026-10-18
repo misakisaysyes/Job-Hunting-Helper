@@ -10,12 +10,12 @@ function formatTime(value) {
 }
 
 export default function ExchangeConversationList({ conversations, total, page, pageSize, loading, onPage, filtered,
-  onOpen, onDelete, opening, deleting, busy, batch, onBatchModeChange }) {
+  onOpen, onDelete, opening, deleting, busy, batch, onBatchModeChange, toolbar }) {
   const start = total ? page * pageSize + 1 : 0;
   const end = Math.min(total, (page + 1) * pageSize);
   return <section className="panel" aria-label="「有交换」会话列表">
-    <div className="panel-head"><span>有交换会话</span><span className="range">{total ? `${start}–${end} / ${total}` : "暂无记录"}</span></div>
-    <div className="monitoring-batch-toolbar"><button type="button" className="toolbar-button"
+    <div className="panel-head"><span>有交换会话</span><span className="range">{`${start}–${end} / ${total}`}</span></div>
+    <div className="job-toolbar monitoring-list-toolbar">{toolbar}<button type="button" className="toolbar-button"
       disabled={loading || Boolean(batch.busy) || Boolean(busy || opening || deleting)}
       onClick={() => onBatchModeChange(!batch.batchMode)}>
       {batch.batchMode ? "退出批量操作" : "批量操作"}

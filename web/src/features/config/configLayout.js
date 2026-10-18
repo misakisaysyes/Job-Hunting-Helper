@@ -15,6 +15,10 @@ export const CONFIG_SECTIONS = [
             title: "搜索流", description: "按城市与关键词组合搜索岗位。",
             fields: ["collection.cities", "collection.keywords", "collection.sort"],
           },
+          both: {
+            title: "推荐流 + 搜索流", description: "每轮先采集推荐流，再采集搜索流；未达目标时按顺序重复。",
+            fields: ["collection.encrypt_expect_id", "collection.cities", "collection.keywords", "collection.sort"],
+          },
         },
       },
       {

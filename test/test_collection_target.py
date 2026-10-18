@@ -100,6 +100,73 @@ class CollectionTargetTests(unittest.TestCase):
         self.assertEqual(result.reason_code, "target_reached")
         self.assertEqual(result.counts["qualified"], 2)
 
+    def test_combined_mode_scans_both_sources_with_shared_dedup(self):
+        self.config["ai"]["use_ai_score"] = False
+        self.config["collection"].update(
+            mode="both", encrypt_expect_id=["a"], keywords=["前端"], cities=["北京"],
+            target_jobs=1,
+        )
+        records = []
+        browser = FakeBrowser(lambda method, _params, _number:
+                              [api_job("same")] if method == "GET"
+                              else [api_job("same"), api_job("search-only")])
+        with patch("collector.platforms.boss.random.SystemRandom.shuffle", lambda _rng, values: None), \
+                patch("run.ChromeBrowser", return_value=browser), \
+                patch("collector.platforms.boss.PageThrottle.wait", return_value=False), \
+                patch("collector.platforms.boss._wait_or_stop", return_value=False), \
+                patch("collector.platforms.boss.BossCollector._refresh_font_digits", return_value=False):
+            result = run_collection(self.config, on_record=records.append)
+
+        self.assertEqual([method for method, _ in browser.requests], ["GET", "POST"])
+        self.assertEqual(result.reason_code, "target_reached")
+        self.assertEqual(result.counts["new"], 2)
+        self.assertEqual(result.counts["duplicate_jobs"], 0)
+        self.assertEqual({record["source_job_id"]: record["source_mode"] for record in records},
+                         {"same": "recommend", "search-only": "search"})
+
+    def test_combined_mode_finishes_recommendation_combos_before_search(self):
+        self.config["ai"]["use_ai_score"] = False
+        self.config["collection"].update(
+            mode="both", encrypt_expect_id=["a", "b"],
+            keywords=["前端", "后端"], cities=["北京"], target_jobs=4,
+        )
+        browser = FakeBrowser(lambda method, params, _number: [api_job(
+            params["encryptExpectId"] if method == "GET" else params["query"]
+        )])
+
+        result = self.run_with_browser(browser)
+
+        self.assertEqual(
+            [(method, params.get("encryptExpectId") if method == "GET" else params["query"])
+             for method, params in browser.requests],
+            [("GET", "a"), ("GET", "b"), ("POST", "前端"), ("POST", "后端")],
+        )
+        self.assertEqual(result.reason_code, "target_reached")
+
+    def test_combined_mode_repeats_recommend_then_search_until_target(self):
+        self.config["ai"]["use_ai_score"] = False
+        self.config["collection"].update(
+            mode="both", encrypt_expect_id=["a"], keywords=["前端"],
+            cities=["北京"], target_jobs=4,
+        )
+        browser = FakeBrowser(lambda _method, _params, number: [api_job(f"job-{number}")])
+
+        result = self.run_with_browser(browser)
+
+        self.assertEqual([method for method, _ in browser.requests], ["GET", "POST", "GET", "POST"])
+        self.assertEqual(result.reason_code, "target_reached")
+
+    def test_combined_mode_shares_daily_list_page_limit(self):
+        self.config["ai"]["use_ai_score"] = False
+        self.config["collection"].update(
+            mode="both", encrypt_expect_id=["a"], keywords=["前端"], cities=["北京"],
+            target_jobs=2, daily_search_page_limit=1,
+        )
+        browser = FakeBrowser(lambda *_: [api_job("first")])
+        result = self.run_with_browser(browser)
+        self.assertEqual([method for method, _ in browser.requests], ["GET"])
+        self.assertEqual(result.reason_code, "daily_search_page_limit")
+
     def test_stop_event_preserves_collected_job_and_skips_remaining_jobs(self):
         self.config["ai"]["use_ai_score"] = False
         stop = Event()

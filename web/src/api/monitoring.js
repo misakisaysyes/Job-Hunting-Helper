@@ -31,8 +31,9 @@ export function listExchangedConversations(limit, offset, query = "", poolStatus
   return requestJson(`/api/exchanged-conversations?${params}`);
 }
 
-export function openExchangedConversation(platform, conversationId) {
-  return requestJson(`/api/exchanged-conversations/${encodeURIComponent(platform)}/${encodeURIComponent(conversationId)}/open`, jsonOptions("POST", {}));
+export function openExchangedConversation(platform, conversationId, sourceJobId) {
+  return requestJson(`/api/exchanged-conversations/${encodeURIComponent(platform)}/${encodeURIComponent(conversationId)}/open`,
+    jsonOptions("POST", { source_job_id: sourceJobId }));
 }
 
 export function deleteExchangedConversation(platform, conversationId) {
@@ -60,12 +61,14 @@ export function confirmFilterDelete(platform, conversationId, confirmStillPresen
     jsonOptions("POST", { confirm_still_present: confirmStillPresent }));
 }
 
-export function openConversation(platform, conversationId) {
-  return requestJson(`/api/conversations/${encodeURIComponent(platform)}/${encodeURIComponent(conversationId)}/open`, jsonOptions("POST"));
+export function openConversation(platform, conversationId, sourceJobId) {
+  return requestJson(`/api/conversations/${encodeURIComponent(platform)}/${encodeURIComponent(conversationId)}/open`,
+    jsonOptions("POST", { source_job_id: sourceJobId }));
 }
 
-export function openFilterCandidate(platform, conversationId) {
-  return requestJson(`/api/filter-candidates/${encodeURIComponent(platform)}/${encodeURIComponent(conversationId)}/open`, jsonOptions("POST"));
+export function openFilterCandidate(platform, conversationId, sourceJobId) {
+  return requestJson(`/api/filter-candidates/${encodeURIComponent(platform)}/${encodeURIComponent(conversationId)}/open`,
+    jsonOptions("POST", { source_job_id: sourceJobId ?? "" }));
 }
 
 export function getFollowup(platform, conversationId) {

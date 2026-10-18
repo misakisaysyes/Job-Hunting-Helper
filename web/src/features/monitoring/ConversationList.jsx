@@ -25,13 +25,13 @@ function unavailableFollowupInfo(conversation) {
     className: "unavailable", reason: detail };
 }
 
-export default function ConversationList({ conversations, total, page, pageSize, loading, onPage, expanded, onExpanded, renderDetails, onDelete, busyAction, busyDelete, filtered, batch, onBatchModeChange }) {
+export default function ConversationList({ conversations, total, page, pageSize, loading, onPage, expanded, onExpanded, renderDetails, onDelete, busyAction, busyDelete, filtered, batch, onBatchModeChange, toolbar }) {
   const start = total === 0 ? 0 : page * pageSize + 1;
   const end = Math.min(total, (page + 1) * pageSize);
   return (
     <section className="panel" aria-label="「仅沟通」会话列表">
-      <div className="panel-head"><span>会话列表</span><span className="range">{total ? `${start}–${end} / ${total}` : "暂无记录"}</span></div>
-      <div className="monitoring-batch-toolbar"><button type="button" className="toolbar-button"
+      <div className="panel-head"><span>会话列表</span><span className="range">{`${start}–${end} / ${total}`}</span></div>
+      <div className="job-toolbar monitoring-list-toolbar">{toolbar}<button type="button" className="toolbar-button"
         disabled={loading || Boolean(batch.busy) || Boolean(busyAction)}
         onClick={() => onBatchModeChange(!batch.batchMode)}>
         {batch.batchMode ? "退出批量操作" : "批量操作"}

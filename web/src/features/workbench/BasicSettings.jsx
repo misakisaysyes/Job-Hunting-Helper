@@ -32,8 +32,8 @@ export function CollectionBasics({ settings, checks, onSave }) {
       await onSave({
         collection: {
           mode: draft.mode,
-          encrypt_expect_id: draft.mode === "recommend" ? splitValues(draft.expectIds) : [],
-          keywords: draft.mode === "search" ? splitValues(draft.keywords) : [],
+          encrypt_expect_id: draft.mode !== "search" ? splitValues(draft.expectIds) : [],
+          keywords: draft.mode !== "recommend" ? splitValues(draft.keywords) : [],
         },
         browser: { cdp_url: draft.cdpUrl, silent_background: draft.silentBackground },
         profile: { resume_path: draft.resumePath },
@@ -57,6 +57,7 @@ export function CollectionBasics({ settings, checks, onSave }) {
       <label>采集来源
         <select value={draft.mode} onChange={(event) => update("mode", event.target.value)}>
           <option value="recommend">推荐流</option><option value="search">搜索流</option>
+          <option value="both">推荐流 + 搜索流</option>
         </select>
       </label>
       <label>Chrome 调试地址
@@ -68,9 +69,10 @@ export function CollectionBasics({ settings, checks, onSave }) {
         onChange={(event) => update("silentBackground", event.target.checked)} />
       静默后台运行（采集、监测和批量操作使用后台工作页）
     </label>
-    {draft.mode === "recommend" ? <label>求职期望 ID（多个用逗号分隔）
+    {draft.mode !== "search" && <label>求职期望 ID（多个用逗号分隔）
       <input value={draft.expectIds} onChange={(event) => update("expectIds", event.target.value)} />
-    </label> : <label>搜索关键词（多个用逗号分隔）
+    </label>}
+    {draft.mode !== "recommend" && <label>搜索关键词（多个用逗号分隔）
       <input value={draft.keywords} onChange={(event) => update("keywords", event.target.value)} />
     </label>}
     <label className="workbench-checkbox">

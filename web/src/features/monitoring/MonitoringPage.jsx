@@ -10,8 +10,9 @@ import ExchangeConversationList from "./ExchangeConversationList";
 import MonitoringStatus from "./MonitoringStatus";
 import useMonitoringBatch from "./useMonitoringBatch";
 import { createFollowupGenerationAction } from "./followupGeneration";
+import { createFollowupSendingAction } from "./followupSending";
+import { PAGE_SIZE } from "../../lib/pagination";
 
-const PAGE_SIZE = 20;
 const MONITORING_TABS = [
   ["communicated", "仅沟通"],
   ["exchanged", "有交换"],
@@ -121,22 +122,13 @@ export default function MonitoringPage() {
     items: visibleConversations.map((item) => ({ ...item, saved_followup_text: item.followup_text,
       followup_text: followupText(item) })), page,
     filters: `${conversationQuery}\u0000${conversationStatus}\u0000${followupStatus}`,
+    persistSelectionAcrossPages: true,
     loading: listLoading || monitoringBusy || Boolean(busyFollowup || busyTerminate || busyConversationDelete || openingConversation),
     onTaskChange: updateBatchTask,
     onReload: () => setListVersion((version) => version + 1),
     actions: {
       generate: createFollowupGenerationAction(generateFollowup, updateFollowup),
-      followup: {
-        label: "追问", preview: true, stopOnFailure: true,
-        batchAction: "followup",
-        toBatchItem: (item) => ({ platform: item.platform, conversation_id: item.conversation_id,
-          text: item.followup_text, anchor_id: item.followup_anchor_id, expected_text: item.saved_followup_text }),
-        eligible: (item) => item.followup_display_status === "available"
-          && item.followup_text.trim().length <= 300,
-        perform: (item) => sendFollowup(item.platform, item.conversation_id,
-          { text: item.followup_text, anchor_id: item.followup_anchor_id,
-            expected_text: item.saved_followup_text }),
-      },
+      followup: createFollowupSendingAction(sendFollowup),
       terminate: {
         label: "终止会话", eligible: (item) => item.followup_status !== "sending",
         confirm: (count, skipped) => `确定终止所选 ${count} 条会话吗？后续扫描会跳过这些会话。${skipped ? `另有 ${skipped} 条将跳过。` : ""}`,
@@ -152,6 +144,7 @@ export default function MonitoringPage() {
   const filterBatch = useMonitoringBatch({
     items: visibleFilterCandidates, page: filterPage,
     filters: `${filterQuery}\u0000${filterStatus}`,
+    persistSelectionAcrossPages: true,
     loading: filterLoading || monitoringBusy || Boolean(busyFilter || busyFilterRecordDelete || openingFilterCandidate),
     onTaskChange: updateBatchTask,
     onReload: () => setListVersion((version) => version + 1),
@@ -391,7 +384,8 @@ export default function MonitoringPage() {
     setOpeningConversation(key);
     setOpenNotice(null);
     try {
-      const result = await openConversation(conversation.platform, conversation.conversation_id);
+      const result = await openConversation(conversation.platform, conversation.conversation_id,
+        conversation.source_job_id);
       setOpenNotice({ type: "success", text: result.message || "已在 Chrome 打开对应的 BOSS 会话" });
     } catch (cause) {
       setOpenNotice({ type: "error", text: cause.message || "打开会话失败" });
@@ -502,8 +496,9 @@ export default function MonitoringPage() {
     setOpeningFilterCandidate(key);
     setFilterNotice(null);
     try {
-      const result = await openFilterCandidate(candidate.platform, candidate.conversation_id);
-      setFilterNotice({ type: "success", text: result.message || "已打开会话" });
+      const result = await openFilterCandidate(candidate.platform, candidate.conversation_id,
+        candidate.source_job_id);
+      setFilterNotice({ type: "success", text: result.message || "已在 BOSS「新招呼」列表中定位会话" });
     } catch (cause) {
       setFilterNotice({ type: "error", text: cause.message || "打开会话失败" });
     } finally {
@@ -516,7 +511,8 @@ export default function MonitoringPage() {
     setOpeningExchange(key);
     setExchangeNotice(null);
     try {
-      const result = await openExchangedConversation(conversation.platform, conversation.conversation_id);
+      const result = await openExchangedConversation(conversation.platform, conversation.conversation_id,
+        conversation.source_job_id);
       setExchangeNotice({ type: "success", text: result.message || "已在 Chrome 打开「有交换」中的目标会话" });
     } catch (cause) {
       setExchangeNotice({ type: "error", text: cause.message || "定位有交换会话失败" });
@@ -575,35 +571,36 @@ export default function MonitoringPage() {
         <div><h2>「仅沟通」会话列表</h2>
           <p>查看「仅沟通」中未读或已读未回会话的追问进展、入库和更新时间。</p></div>
       </div>
-      <div className="monitoring-filters monitoring-conversation-filters" aria-label="「仅沟通」会话列表筛选">
-        <input type="search" aria-label="搜索会话" placeholder="搜索岗位、公司、HR 或会话 ID"
-          disabled={Boolean(conversationBatch.busy)}
-          value={conversationSearch} onChange={(event) => { setPage(0); setConversationSearch(event.target.value); }} />
-        <div className="monitoring-select">
-          <select aria-label="筛选HR检阅状态"
-            value={conversationStatus} disabled={Boolean(conversationBatch.busy)}
-            onChange={(event) => { setPage(0); setConversationStatus(event.target.value); }}>
-            <option value="">{selectedCountLabel("全部HR检阅状态", "", conversationStatus, conversationCount)}</option>
-            <option value="unread">{selectedCountLabel("未读", "unread", conversationStatus, conversationCount)}</option>
-            <option value="read_no_reply">{selectedCountLabel("已读未回", "read_no_reply", conversationStatus, conversationCount)}</option>
-          </select>
-        </div>
-        <div className="monitoring-select">
-          <select aria-label="筛选追问状态"
-            value={followupStatus} disabled={Boolean(conversationBatch.busy)}
-            onChange={(event) => { setPage(0); setFollowupStatus(event.target.value); }}>
-            <option value="">{selectedCountLabel("全部追问状态", "", followupStatus, conversationCount)}</option>
-            <option value="available">{selectedCountLabel("可追问", "available", followupStatus, conversationCount)}</option>
-            <option value="unavailable">{selectedCountLabel("不可追问", "unavailable", followupStatus, conversationCount)}</option>
-            <option value="sending">{selectedCountLabel("发送中", "sending", followupStatus, conversationCount)}</option>
-            <option value="incomplete">{selectedCountLabel("追问未完成", "incomplete", followupStatus, conversationCount)}</option>
-          </select>
-        </div>
-      </div>
       {listError && <div className="error" role="alert">{listError}</div>}
       {openNotice && <div className={openNotice.type === "error" ? "error" : "notice"}
         role={openNotice.type === "error" ? "alert" : "status"}>{openNotice.text}</div>}
-      <ConversationList conversations={visibleConversations}
+      <ConversationList toolbar={
+          <div className="monitoring-filters monitoring-conversation-filters" aria-label="「仅沟通」会话列表筛选">
+          <input type="search" aria-label="搜索会话" placeholder="搜索岗位、公司、HR 或会话 ID"
+            disabled={Boolean(conversationBatch.busy)}
+            value={conversationSearch} onChange={(event) => { setPage(0); setConversationSearch(event.target.value); }} />
+          <div className="monitoring-select">
+            <select aria-label="筛选HR检阅状态"
+              value={conversationStatus} disabled={Boolean(conversationBatch.busy)}
+              onChange={(event) => { setPage(0); setConversationStatus(event.target.value); }}>
+              <option value="">{selectedCountLabel("全部HR检阅状态", "", conversationStatus, conversationCount)}</option>
+              <option value="unread">{selectedCountLabel("未读", "unread", conversationStatus, conversationCount)}</option>
+              <option value="read_no_reply">{selectedCountLabel("已读未回", "read_no_reply", conversationStatus, conversationCount)}</option>
+            </select>
+          </div>
+          <div className="monitoring-select">
+            <select aria-label="筛选追问状态"
+              value={followupStatus} disabled={Boolean(conversationBatch.busy)}
+              onChange={(event) => { setPage(0); setFollowupStatus(event.target.value); }}>
+              <option value="">{selectedCountLabel("全部追问状态", "", followupStatus, conversationCount)}</option>
+              <option value="available">{selectedCountLabel("可追问", "available", followupStatus, conversationCount)}</option>
+              <option value="unavailable">{selectedCountLabel("不可追问", "unavailable", followupStatus, conversationCount)}</option>
+              <option value="sending">{selectedCountLabel("发送中", "sending", followupStatus, conversationCount)}</option>
+              <option value="incomplete">{selectedCountLabel("追问未完成", "incomplete", followupStatus, conversationCount)}</option>
+            </select>
+          </div>
+        </div>
+      } conversations={visibleConversations}
         total={conversationResultKey === conversationKey ? total : 0} page={page} pageSize={PAGE_SIZE}
         loading={listLoading || conversationResultKey !== conversationKey} onPage={setPage}
         expanded={expandedConversation} onExpanded={setExpandedConversation}
@@ -628,7 +625,7 @@ export default function MonitoringPage() {
         <section className="followup-modal monitoring-batch-preview" role="dialog" aria-modal="true"
           aria-labelledby="batch-followup-title" onMouseDown={(event) => event.stopPropagation()}>
           <div className="followup-modal-heading"><div><h3 id="batch-followup-title">批量追问语预览</h3>
-            <p>将处理 {conversationBatch.preview.eligible.length} 条；其中追问语为空的会记为失败并继续下一条；跳过 {conversationBatch.preview.skipped} 条。</p></div>
+            <p>将处理 {conversationBatch.preview.eligible.length} 条，跳过 {conversationBatch.preview.skipped} 条未准备好追问草稿或不符合条件的会话。追问语为空的会记为失败并继续下一条。</p></div>
             <button type="button" aria-label="关闭批量追问语预览" onClick={() => conversationBatch.setPreview(null)}>×</button>
           </div>
           <div className="monitoring-batch-preview-list">{conversationBatch.preview.eligible.map((item) =>
@@ -650,24 +647,25 @@ export default function MonitoringPage() {
         <div><h2>「有交换」会话列表</h2>
           <p>从 BOSS「更多 → 有交换」读取会话；池外岗位保持池外，不会自动入池。</p></div>
       </div>
-      <div className="monitoring-filters" aria-label="「有交换」会话列表筛选">
-        <input type="search" aria-label="搜索有交换会话" placeholder="搜索岗位、公司、HR 或会话 ID"
-          disabled={Boolean(exchangeBatch.busy)}
-          value={exchangeSearch} onChange={(event) => { setExchangePage(0); setExchangeSearch(event.target.value); }} />
-        <div className="monitoring-select">
-          <select aria-label="筛选有交换岗位池状态"
-            value={exchangePoolStatus} disabled={Boolean(exchangeBatch.busy)}
-            onChange={(event) => { setExchangePage(0); setExchangePoolStatus(event.target.value); }}>
-            <option value="">{selectedCountLabel("全部岗位", "", exchangePoolStatus, exchangeCount)}</option>
-            <option value="inside">{selectedCountLabel("池内", "inside", exchangePoolStatus, exchangeCount)}</option>
-            <option value="outside">{selectedCountLabel("池外", "outside", exchangePoolStatus, exchangeCount)}</option>
-          </select>
-        </div>
-      </div>
       {exchangeError && <div className="error" role="alert">{exchangeError}</div>}
       {exchangeNotice && <div className={exchangeNotice.type === "error" ? "error" : "notice"}
         role={exchangeNotice.type === "error" ? "alert" : "status"}>{exchangeNotice.text}</div>}
-      <ExchangeConversationList conversations={visibleExchanges}
+      <ExchangeConversationList toolbar={
+          <div className="monitoring-filters" aria-label="「有交换」会话列表筛选">
+          <input type="search" aria-label="搜索有交换会话" placeholder="搜索岗位、公司、HR 或会话 ID"
+            disabled={Boolean(exchangeBatch.busy)}
+            value={exchangeSearch} onChange={(event) => { setExchangePage(0); setExchangeSearch(event.target.value); }} />
+          <div className="monitoring-select">
+            <select aria-label="筛选有交换岗位池状态"
+              value={exchangePoolStatus} disabled={Boolean(exchangeBatch.busy)}
+              onChange={(event) => { setExchangePage(0); setExchangePoolStatus(event.target.value); }}>
+              <option value="">{selectedCountLabel("全部岗位", "", exchangePoolStatus, exchangeCount)}</option>
+              <option value="inside">{selectedCountLabel("池内", "inside", exchangePoolStatus, exchangeCount)}</option>
+              <option value="outside">{selectedCountLabel("池外", "outside", exchangePoolStatus, exchangeCount)}</option>
+            </select>
+          </div>
+        </div>
+      } conversations={visibleExchanges}
         total={exchangeResultKey === exchangeKey ? exchangeTotal : 0} page={exchangePage}
         pageSize={PAGE_SIZE} loading={exchangeLoading || exchangeResultKey !== exchangeKey} onPage={setExchangePage}
         filtered={Boolean(exchangeQuery || exchangePoolStatus)}
@@ -685,28 +683,29 @@ export default function MonitoringPage() {
         <div><h2>「新招呼」会话列表</h2>
           <p>仅展示「新招呼」中命中公司排除词的会话；确认删除后会先打开目标会话，再从菜单删除。打开会话可能清除未读标记。</p></div>
       </div>
-      <div className="monitoring-filters monitoring-filter-candidates" aria-label="「新招呼」会话列表筛选">
-        <input type="search" aria-label="搜索过滤候选" placeholder="搜索公司、HR、岗位、排除词或会话 ID"
-          disabled={Boolean(filterBatch.busy)}
-          value={filterSearch} onChange={(event) => { setFilterPage(0); setFilterSearch(event.target.value); }} />
-        <div className="monitoring-select">
-          <select aria-label="筛选过滤状态"
-            value={filterStatus} disabled={Boolean(filterBatch.busy)}
-            onChange={(event) => { setFilterPage(0); setFilterStatus(event.target.value); }}>
-            <option value="">{selectedCountLabel("全部处理状态", "", filterStatus, filterCount)}</option>
-            <option value="pending_review">{selectedCountLabel("待审核删除", "pending_review", filterStatus, filterCount)}</option>
-            <option value="deleting">{selectedCountLabel("删除中", "deleting", filterStatus, filterCount)}</option>
-            <option value="deleted">{selectedCountLabel("已删除", "deleted", filterStatus, filterCount)}</option>
-            <option value="failed">{selectedCountLabel("删除失败", "failed", filterStatus, filterCount)}</option>
-            <option value="unknown">{selectedCountLabel("结果不明", "unknown", filterStatus, filterCount)}</option>
-            <option value="stale">{selectedCountLabel("已失效", "stale", filterStatus, filterCount)}</option>
-          </select>
-        </div>
-      </div>
       {filterError && <div className="error" role="alert">{filterError}</div>}
       {filterNotice && <div className={filterNotice.type === "error" ? "error" : "notice"}
         role={filterNotice.type === "error" ? "alert" : "status"}>{filterNotice.text}</div>}
-      <FilterCandidateList candidates={visibleFilterCandidates}
+      <FilterCandidateList toolbar={
+          <div className="monitoring-filters monitoring-filter-candidates" aria-label="「新招呼」会话列表筛选">
+          <input type="search" aria-label="搜索过滤候选" placeholder="搜索公司、HR、岗位、排除词或会话 ID"
+            disabled={Boolean(filterBatch.busy)}
+            value={filterSearch} onChange={(event) => { setFilterPage(0); setFilterSearch(event.target.value); }} />
+          <div className="monitoring-select">
+            <select aria-label="筛选过滤状态"
+              value={filterStatus} disabled={Boolean(filterBatch.busy)}
+              onChange={(event) => { setFilterPage(0); setFilterStatus(event.target.value); }}>
+              <option value="">{selectedCountLabel("全部处理状态", "", filterStatus, filterCount)}</option>
+              <option value="pending_review">{selectedCountLabel("待审核删除", "pending_review", filterStatus, filterCount)}</option>
+              <option value="deleting">{selectedCountLabel("删除中", "deleting", filterStatus, filterCount)}</option>
+              <option value="deleted">{selectedCountLabel("已删除", "deleted", filterStatus, filterCount)}</option>
+              <option value="failed">{selectedCountLabel("删除失败", "failed", filterStatus, filterCount)}</option>
+              <option value="unknown">{selectedCountLabel("结果不明", "unknown", filterStatus, filterCount)}</option>
+              <option value="stale">{selectedCountLabel("已失效", "stale", filterStatus, filterCount)}</option>
+            </select>
+          </div>
+        </div>
+      } candidates={visibleFilterCandidates}
         total={filterResultKey === filterKey ? filterTotal : 0} page={filterPage}
         pageSize={PAGE_SIZE} loading={filterLoading || filterResultKey !== filterKey} onPage={setFilterPage}
         onAction={handleFilter} onOpen={openFilteredChat} onDelete={handleFilterRecordDelete}

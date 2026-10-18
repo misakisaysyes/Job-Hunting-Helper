@@ -180,14 +180,20 @@ class BossModeTests(unittest.TestCase):
 
     def test_cli_requires_mode_and_recommend_expect_id(self) -> None:
         commands = (
-            ([], "--mode"),
-            (["--mode", "recommend"], "需要非空的 --encrypt-expect-id"),
+            (["--mode", "invalid"], "invalid choice"),
+            (["--mode", "recommend", "--clear-encrypt-expect-id", "--clear-keyword"],
+             "需要非空的 --encrypt-expect-id"),
             (["--mode", "search", "--keyword", "前端", "--encrypt-expect-id", "unused"],
              "不使用 --encrypt-expect-id"),
             (["--mode", "recommend", "--encrypt-expect-id", "first-id,"],
              "不能包含空 ID"),
             (["--mode", "recommend", "--keyword", "前端"], "不接受 --keyword"),
-            (["--mode", "search"], "需要至少一个 --keyword"),
+            (["--mode", "search", "--clear-keyword", "--clear-encrypt-expect-id"],
+             "需要至少一个 --keyword"),
+            (["--mode", "both", "--keyword", "前端", "--clear-encrypt-expect-id"],
+             "需要非空的 --encrypt-expect-id"),
+            (["--mode", "both", "--encrypt-expect-id", "first-id", "--clear-keyword"],
+             "需要至少一个 --keyword"),
         )
         for options, expected in commands:
             with self.subTest(options=options):

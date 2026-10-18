@@ -46,13 +46,13 @@ DEFAULT_CONFIG = {
     "collection": {
         # 采集平台：当前仅支持 "boss"。
         "platform": "boss",
-        # 抓取模式：None、"recommend"（推荐流）、"search"（搜索流）；None 时运行须传 --mode。
+        # 抓取模式：recommend（推荐流）、search（搜索流）、both（推荐流 + 搜索流）。
         "mode": "recommend",
-        # 推荐流的求职期望 ID 列表；每个 ID 分别抓取，recommend 模式至少一个，search 模式须为 []。
+        # 推荐流的求职期望 ID 列表；recommend 和 both 模式至少一个，search 模式须为 []。
         "encrypt_expect_id": [],
         # 是否先运行本地预筛用例；可选 True / False。
         "test_prefilter": False,
-        # 搜索流的搜索词列表；search 模式至少一个，recommend 模式必须为空。
+        # 搜索流的搜索词列表；search 和 both 模式至少一个，recommend 模式必须为空。
         "keywords": [],
         # 搜索流可多选内置城市；空列表表示按 BOSS 当前会话的城市搜索。
         "cities": [],

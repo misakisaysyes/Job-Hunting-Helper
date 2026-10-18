@@ -8,8 +8,8 @@ import WorkbenchHome from "./features/workbench/WorkbenchHome";
 import ConfigurationPage from "./features/config/ConfigurationPage";
 import { useAlertSound } from "./hooks/useAlertSound";
 import { claimTaskCompletion, createTaskCompletionTracker } from "./lib/taskCompletion";
+import { PAGE_SIZE } from "./lib/pagination";
 
-const PAGE_SIZE = 15;
 const DEFAULT_SCORE_THRESHOLD = 71;
 export default function App() {
   const { playConfirmationAlert } = useAlertSound();

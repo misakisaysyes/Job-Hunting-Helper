@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title description">
+  <title id="title">Job Hunting Helper 片尾卡</title>
+  <desc id="description">项目名称、口号与 GitHub 仓库地址。</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#F9FBFE"/><stop offset="1" stop-color="#EAF3FD"/></linearGradient>
+    <linearGradient id="brand" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#2E8FF3"/><stop offset="1" stop-color="#0C65CF"/></linearGradient>
+    <pattern id="grid" width="70" height="70" patternUnits="userSpaceOnUse"><path d="M 70 0 L 0 0 0 70" fill="none" stroke="#C4D6EA" stroke-width="1" opacity=".35"/></pattern>
+  </defs>
+  <rect width="1920" height="1080" fill="#F7FAFE"/>
+
+  <circle cx="1600" cy="280" r="360" fill="#DCEEFF" opacity=".65"/>
+  <circle cx="230" cy="930" r="320" fill="#E5F4ED" opacity=".75"/>
+  <rect x="883" y="235" width="154" height="154" rx="38" fill="#1978E6"/>
+  <text x="960" y="338" text-anchor="middle" fill="#FFF" font-family="Arial,sans-serif" font-weight="700" font-size="96">J</text>
+  <text x="960" y="496" text-anchor="middle" fill="#25334C" font-family="Arial,sans-serif" font-weight="700" font-size="64">Job Hunting Helper</text>
+  <text x="960" y="586" text-anchor="middle" fill="#536C88" font-family="PingFang SC,Noto Sans CJK SC,sans-serif" font-size="39">找岗位、跟进、复盘，放在同一处。</text>
+  <path d="M 630 660 H 1290" stroke="#C8D8E9" stroke-width="2"/>
+  <text x="960" y="741" text-anchor="middle" fill="#1978E6" font-family="Arial,sans-serif" font-size="29">github.com/misakisaysyes/Job-Hunting-Helper</text>
+  <text x="960" y="842" text-anchor="middle" fill="#8292A7" font-family="PingFang SC,Noto Sans CJK SC,sans-serif" font-size="22">一个在本地运行的 BOSS 求职工作台</text>
+</svg>

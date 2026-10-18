@@ -254,8 +254,8 @@ def _validate_value(section: str, key: str, value: object) -> object:
     if not isinstance(value, str) or not value.strip():
         raise SettingsError(f"{name} 不能为空")
     value = value.strip()
-    if key == "mode" and value not in {"recommend", "search"}:
-        raise SettingsError("采集模式只能是推荐流或搜索流")
+    if key == "mode" and value not in {"recommend", "search", "both"}:
+        raise SettingsError("采集模式只能是推荐流、搜索流或推荐流 + 搜索流")
     return value
 
 

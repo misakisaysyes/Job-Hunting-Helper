@@ -41,10 +41,14 @@ function beijingDate(value) {
 
 function configSummary(config) {
   if (!config) return "配置暂不可用";
-  const source = config.mode === "search"
-    ? `搜索流（${[config.cities?.join("、") || config.city, `${config.keywords?.length ?? 0} 个关键词`].filter(Boolean).join("，")}）`
+  const recommendSource = `推荐流（${config.expect_id_prefixes?.slice(0, 4).join("、") || "未配置期望"}${config.expect_id_prefixes?.length > 4 ? "等" : ""}）`;
+  const searchSource = `搜索流（${[config.cities?.join("、") || config.city, `${config.keywords?.length ?? 0} 个关键词`].filter(Boolean).join("，")}）`;
+  const source = config.mode === "both"
+    ? `${recommendSource} + ${searchSource}`
+    : config.mode === "search"
+    ? searchSource
     : config.mode === "recommend"
-      ? `推荐流（${config.expect_id_prefixes?.slice(0, 4).join("、") || "未配置期望"}${config.expect_id_prefixes?.length > 4 ? "等" : ""}）`
+      ? recommendSource
       : null;
   const salary = config.salary_min || config.salary_max
     ? `月薪 ${config.salary_min || 0}–${config.salary_max || "不限"}K` : null;

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from urllib.parse import parse_qs, urlencode, urljoin, urlsplit
 from uuid import uuid4
 from typing import Any
 
@@ -10,7 +11,7 @@ from patchright.sync_api import TimeoutError as BrowserTimeout
 from patchright.sync_api import sync_playwright
 
 
-_BOSS_CHAT_ROW_MATCHES = """({avatar, name, brand, selectedOnly = false}) => {
+_BOSS_CHAT_ROW_MATCHES = """({avatar, name, brand, selectedOnly = false, exactIdentity = false}) => {
     const avatarKey = value => {
         try {
             const url = new URL(value, location.href);
@@ -22,14 +23,68 @@ _BOSS_CHAT_ROW_MATCHES = """({avatar, name, brand, selectedOnly = false}) => {
     const matches = rows.flatMap((node, index) => {
         const text = node.innerText || '';
         const src = node.querySelector('img.image-circle')?.src;
+        const identityMatches = exactIdentity
+            ? node.querySelector('.name-text')?.textContent?.trim() === name
+                && node.querySelector('.name-box > span:nth-child(2)')?.textContent?.trim() === brand
+            : (!name || text.includes(name)) && (!brand || text.includes(brand));
         return key && src && avatarKey(src) === key
-            && (!name || text.includes(name)) && (!brand || text.includes(brand))
+            && identityMatches
             ? [index] : [];
     });
     if (!selectedOnly) return matches;
     return matches.length === 1 && rows[matches[0]].classList.contains('selected')
         && rows.filter(node => node.classList.contains('selected')).length === 1;
 }"""
+
+
+_BOSS_CHAT_HIGHLIGHT_ROW = """identity => {
+    const matches = (""" + _BOSS_CHAT_ROW_MATCHES + """)(identity);
+    if (matches.length > 1) return 'ambiguous';
+    if (matches.length !== 1) return 'missing';
+    const element = document.querySelectorAll('.friend-content')[matches[0]];
+    element.scrollIntoView({block: 'center', inline: 'nearest'});
+    element.style.outline = '3px solid #1976e8';
+    element.style.outlineOffset = '-3px';
+    element.style.backgroundColor = '#edf5ff';
+    return 'located';
+}"""
+
+
+_BOSS_CHAT_CONTENT_MATCHES = """({messageIds, jobId}) => {
+    const url = new URL(location.href);
+    if (url.origin !== 'https://www.zhipin.com' || url.pathname !== '/web/geek/chat')
+        return false;
+    const routeJob = url.searchParams.get('jobId');
+    if (routeJob && routeJob !== jobId) return false;
+    const root = document.querySelector('.chat-record');
+    if (!root) return false;
+    const vue = root.__vue__;
+    const records = vue && Array.isArray(vue.list$) ? vue.list$ : [];
+    const renderedIds = new Set(records.flatMap(record => record
+        ? [record.mid, record.messageId, record.message_id] : [])
+        .filter(value => value != null).map(String));
+    root.querySelectorAll('[data-mid], [data-message-id]').forEach(node => {
+        for (const key of ['data-mid', 'data-message-id']) {
+            const value = node.getAttribute(key);
+            if (value) renderedIds.add(value);
+        }
+    });
+    if (!messageIds.some(id => renderedIds.has(id))) return false;
+    const links = [...(document.querySelector('.chat-conversation')
+        ?.querySelectorAll('a[href*="/job_detail/"]') || [])];
+    const displayedJobs = links.flatMap(node => {
+        try {
+            const link = new URL(node.href, location.href);
+            const match = link.pathname.match(/^\\/job_detail\\/([^/]+)\\.html$/);
+            return link.origin === url.origin && match ? [decodeURIComponent(match[1])] : [];
+        } catch (_) { return []; }
+    });
+    return !displayedJobs.length || displayedJobs.includes(jobId);
+}"""
+
+
+class ConversationLocationError(RuntimeError):
+    """The requested recruiter/job could not be verified in the opened chat."""
 
 
 class ChromeBrowser:
@@ -158,34 +213,52 @@ class ChromeBrowser:
             session.detach()
 
     def open_user_conversation(self, url: str, conversation_id: str,
-                               tab_label: str = "仅沟通") -> bool:
+                               tab_label: str = "仅沟通", *,
+                               source_job_id: str | None = None) -> bool:
         """Open a BOSS chat tab and select the exact recruiter conversation."""
-        return self._show_user_conversation(url, conversation_id, tab_label, select=True)
+        return self._show_user_conversation(url, conversation_id, tab_label,
+                                            select=True, source_job_id=source_job_id)
 
     def locate_user_conversation(self, conversation_id: str,
-                                 tab_label: str = "仅沟通") -> bool:
+                                 tab_label: str = "仅沟通", *,
+                                 source_job_id: str | None = None) -> bool:
         """Show and highlight a BOSS list row without entering the conversation."""
         return self._show_user_conversation("https://www.zhipin.com/web/geek/chat",
-                                            conversation_id, tab_label, select=False)
+                                            conversation_id, tab_label, select=False,
+                                            source_job_id=source_job_id)
 
     def _show_user_conversation(self, url: str, conversation_id: str,
-                                tab_label: str, *, select: bool) -> bool:
+                                tab_label: str, *, select: bool,
+                                source_job_id: str | None = None) -> bool:
         page = None
         located = False
         try:
             page = self._context.new_page()
             friends: dict[str, dict[str, Any]] = {}
+            histories: dict[str, list[dict[str, Any]]] = {}
 
             def collect_response(response: Any) -> None:
-                if "/wapi/zprelation/friend/getGeekFriendList.json" not in response.url:
-                    return
                 try:
+                    parsed = urlsplit(response.url)
+                    if parsed.scheme != "https" or parsed.netloc != "www.zhipin.com":
+                        return
+                    if parsed.path not in {"/wapi/zprelation/friend/getGeekFriendList.json",
+                                           "/wapi/zpchat/geek/historyMsg"}:
+                        return
                     body = response.json()
-                    if body.get("code") == 0:
-                        for row in (body.get("zpData") or {}).get("result") or []:
-                            uid = str(row.get("uid") or "")
-                            if uid:
-                                friends[uid] = row
+                    if body.get("code") != 0:
+                        return
+                    data = body.get("zpData") or {}
+                    if parsed.path == "/wapi/zpchat/geek/historyMsg":
+                        boss_id = parse_qs(parsed.query).get("bossId", [""])[0]
+                        messages = data.get("messages")
+                        if boss_id and isinstance(messages, list):
+                            histories[boss_id] = messages
+                        return
+                    for row in data.get("result") or []:
+                        uid = str(row.get("uid") or "")
+                        if uid:
+                            friends[uid] = row
                 except Exception:
                     pass
 
@@ -217,7 +290,18 @@ class ChromeBrowser:
             idle_rounds = 0
             for _ in range(120):
                 friend = friends.get(conversation_id)
-                if friend and friend.get("avatar"):
+                if select and source_job_id and friend is not None:
+                    self._open_exact_boss_chat(page, friend, source_job_id, friends, histories,
+                                               tab_label=tab_label)
+                    page.bring_to_front()
+                    located = True
+                    return True
+                if not select and source_job_id is not None and friend is not None:
+                    if self._locate_exact_boss_row(page, friend, source_job_id, friends, tab_label):
+                        page.bring_to_front()
+                        located = True
+                        return True
+                elif friend and friend.get("avatar"):
                     identity = {"avatar": str(friend["avatar"]),
                                 "name": str(friend.get("name") or ""),
                                 "brand": str(friend.get("brandName") or "")}
@@ -251,7 +335,11 @@ class ChromeBrowser:
                     break
                 previous_state = state
                 page.wait_for_timeout(250)
+            if source_job_id is not None:
+                raise ConversationLocationError(f"未找到对应招聘方的会话，请重新扫描「{tab_label}」后重试")
             return False
+        except ConversationLocationError:
+            raise
         except Exception:
             return False
         finally:
@@ -260,6 +348,72 @@ class ChromeBrowser:
                     page.close()
                 except Exception:
                     pass
+
+    @staticmethod
+    def _locate_exact_boss_row(page: Any, friend: dict[str, Any], source_job_id: str,
+                               friends: dict[str, dict[str, Any]], tab_label: str) -> bool:
+        """Keep incoming greetings unread; highlight only an unambiguous live row."""
+        if str(friend.get("encryptJobId") or "") != source_job_id:
+            raise ConversationLocationError(
+                f"该招聘方的关联岗位已变化，请重新扫描「{tab_label}」后重试")
+
+        def identity(row: dict[str, Any]) -> tuple[str, str, str]:
+            avatar = str(row.get("avatar") or "")
+            avatar_url = (urlsplit(urljoin("https://www.zhipin.com/web/geek/chat", avatar))
+                          ._replace(query="", fragment="").geturl()) if avatar else ""
+            return (avatar_url, str(row.get("name") or "").strip(),
+                    str(row.get("brandName") or "").strip())
+
+        key = identity(friend)
+        if not all(key):
+            raise ConversationLocationError(f"招聘方身份信息不完整，请重新扫描「{tab_label}」后重试")
+        if sum(identity(row) == key for row in friends.values()) != 1:
+            raise ConversationLocationError("存在身份信息相同的多个招聘方，无法唯一定位，请在 BOSS 列表中人工核对")
+        result = page.evaluate(_BOSS_CHAT_HIGHLIGHT_ROW,
+                               {"avatar": key[0], "name": key[1], "brand": key[2], "exactIdentity": True})
+        if result == "ambiguous":
+            raise ConversationLocationError("列表中存在多个相同会话，无法唯一定位，请在 BOSS 列表中人工核对")
+        return result == "located"
+
+    @staticmethod
+    def _open_exact_boss_chat(page: Any, friend: dict[str, Any], source_job_id: str,
+                              friends: dict[str, dict[str, Any]],
+                              histories: dict[str, list[dict[str, Any]]], *,
+                              tab_label: str = "仅沟通") -> None:
+        """Use BOSS's recruiter/job route and verify the rendered message history."""
+        uid = str(friend["uid"])
+        if str(friend.get("encryptJobId") or "") != source_job_id:
+            raise ConversationLocationError(
+                f"该招聘方当前会话的岗位已变化或无法确认，与所选岗位不一致，请重新扫描「{tab_label}」后重试")
+        boss_id = str(friend.get("encryptBossId") or "")
+        if not boss_id:
+            raise ConversationLocationError(f"BOSS 未返回招聘方标识，无法准确打开会话，请重新扫描「{tab_label}」后重试")
+        fields = {"jobId": source_job_id, "id": boss_id}
+        if friend.get("securityId"):
+            fields["securityId"] = str(friend["securityId"])
+        # Old scan URLs contain only a numeric jobId and cannot select a recruiter.
+        # Build the native chat route from the live record for this exact uid.
+        histories.clear()
+        try:
+            page.goto("https://www.zhipin.com/web/geek/chat?" + urlencode(fields),
+                      wait_until="domcontentloaded", timeout=20000)
+        except BrowserTimeout:
+            pass
+        for _ in range(32):
+            current = friends.get(uid, {})
+            if (str(current.get("encryptJobId") or "") != source_job_id
+                    or str(current.get("encryptBossId") or "") != boss_id):
+                raise ConversationLocationError(
+                    f"打开会话时招聘方关联岗位发生变化，请重新扫描「{tab_label}」后重试")
+            messages = histories.get(boss_id, [])
+            message_ids = [str(message["mid"]) for message in messages
+                           if isinstance(message, dict) and message.get("mid") is not None]
+            if message_ids and page.evaluate(_BOSS_CHAT_CONTENT_MATCHES,
+                                             {"messageIds": message_ids, "jobId": source_job_id}):
+                return
+            page.wait_for_timeout(250)
+        raise ConversationLocationError(
+            f"未能确认聊天区已加载对应招聘方和岗位的消息，请重新扫描「{tab_label}」后重试")
 
     def request_boss_json(self, path: str, method: str, fields: dict[str, str]) -> dict[str, Any]:
         """Fetch BOSS JSON inside Chrome so its proxy can observe the request."""

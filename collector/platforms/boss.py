@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import replace
 from itertools import cycle
 import json
 import random
@@ -49,7 +50,7 @@ def build_boss_request(config: dict[str, Any]) -> PlatformCollectionRequest:
 
     city = collection["city"]
     city_code = (collection["city_code"] or CITY_CODES.get(city, "")) if city else ""
-    selected_cities = collection["cities"] if collection["mode"] == "search" else []
+    selected_cities = collection["cities"] if collection["mode"] in {"search", "both"} else []
     cities = list(dict.fromkeys([*selected_cities, *([city] if city else [])]))
     city_codes = {selected: CITY_CODES[selected] for selected in cities if selected in CITY_CODES}
     if city and city_code:
@@ -392,15 +393,15 @@ class BossCollector:
         return str(request.city_codes.get(city) or CITY_CODES.get(city) or "") or None
 
     def collect(self, request: PlatformCollectionRequest, hooks: CollectorHooks) -> PlatformCollectionResult:
-        if request.mode not in {"recommend", "search"}:
-            raise ValueError("BOSS 采集必须指定 recommend 或 search 模式")
-        if request.mode == "search" and not request.keywords:
+        if request.mode not in {"recommend", "search", "both"}:
+            raise ValueError("BOSS 采集必须指定 recommend、search 或 both 模式")
+        if request.mode in {"search", "both"} and not request.keywords:
             raise ValueError("BOSS 搜索流需要关键词")
         if request.mode == "search" and request.encrypt_expect_id:
             raise ValueError("BOSS 搜索流不使用 encryptExpectId")
         if request.mode == "recommend" and request.keywords:
             raise ValueError("BOSS 推荐流不接受搜索关键词")
-        if request.mode == "recommend" and not request.encrypt_expect_id:
+        if request.mode in {"recommend", "both"} and not request.encrypt_expect_id:
             raise ValueError("BOSS 推荐流需要非空 encryptExpectId")
         if not isinstance(request.encrypt_expect_id, list) or any(
             not isinstance(value, str) or not value.strip() for value in request.encrypt_expect_id
@@ -427,6 +428,7 @@ class BossCollector:
             _positive_int(collection_cfg.get("risk_pause_max_minutes", 10), 10),
         )
         detail_worker: str | None = None
+        list_requests = 0
         page_failures = 0
         seen_jobs = 0
         incomplete_combos = 0
@@ -509,27 +511,48 @@ class BossCollector:
             return {generate_boss_job_id(job["url"]) for job in jobs
                     if isinstance(job, dict) and job.get("url")}
 
-        recommend_expect_ids = list(dict.fromkeys(request.encrypt_expect_id)) if request.mode == "recommend" else []
+        recommend_expect_ids = list(dict.fromkeys(request.encrypt_expect_id)) if request.mode in {"recommend", "both"} else []
         if recommend_expect_ids:
             random.SystemRandom().shuffle(recommend_expect_ids)
 
-        combos: list[tuple[str, str, str, str]] = []
-        for city in request.cities or [""]:
-            city_code = self.resolve_city_code(city, request) if city else ""
-            if city and not city_code:
-                hooks.on_event(phase="searching", city=city, reason_code="no_valid_city", message=f"未识别的 BOSS 城市：{city}")
-                continue
-            if request.mode == "search":
-                combos.extend((city, city_code, keyword, "") for keyword in request.keywords)
-            else:
-                combos.extend((city, city_code, "", expect_id)
-                              for expect_id in recommend_expect_ids)
+        recommend_combos: list[tuple[str, str, str, str, str]] = []
+        search_combos: list[tuple[str, str, str, str, str]] = []
+        if recommend_expect_ids:
+            # Mixed mode uses the current BOSS recommendation scope; selected
+            # cities apply to search combinations only.
+            recommend_cities = request.cities if request.mode == "recommend" else [""]
+            for city in recommend_cities or [""]:
+                city_code = self.resolve_city_code(city, request) if city else ""
+                if city and not city_code:
+                    hooks.on_event(phase="searching", city=city, reason_code="no_valid_city", message=f"未识别的 BOSS 城市：{city}")
+                    continue
+                recommend_combos.extend(("recommend", city, city_code, "", expect_id)
+                                        for expect_id in recommend_expect_ids)
+        if request.mode in {"search", "both"}:
+            for city in request.cities or [""]:
+                city_code = self.resolve_city_code(city, request) if city else ""
+                if city and not city_code:
+                    hooks.on_event(phase="searching", city=city, reason_code="no_valid_city", message=f"未识别的 BOSS 城市：{city}")
+                    continue
+                search_combos.extend(("search", city, city_code, keyword, "")
+                                     for keyword in request.keywords)
+            random.SystemRandom().shuffle(search_combos)
+        # Each cycle completes the recommendation phase before the search phase.
+        combos = recommend_combos + search_combos
         if not combos:
             return PlatformCollectionResult(
                 self.platform, "completed_with_shortage", "no_valid_city", "没有有效的 BOSS 搜索组合"
             )
-        if request.mode == "search":
-            random.SystemRandom().shuffle(combos)
+        if request.mode == "both" and (not recommend_combos or not search_combos):
+            return PlatformCollectionResult(
+                self.platform, "completed_with_shortage", "no_valid_city", "推荐流或搜索流没有有效来源组合"
+            )
+
+        scanned_modes: set[str] = set()
+
+        def target_ready() -> bool:
+            return bool(hooks.target_count and hooks.target_reached()
+                        and (request.mode != "both" or scanned_modes == {"recommend", "search"}))
 
         def target_met() -> PlatformCollectionResult:
             return PlatformCollectionResult(
@@ -545,12 +568,12 @@ class BossCollector:
 
         cycle_new = 0
         try:
-            for combination_index, (city, city_code, keyword, expect_id) in enumerate(cycle(combos)):
+            for combination_index, (combo_mode, city, city_code, keyword, expect_id) in enumerate(cycle(combos)):
                 if combination_index and combination_index % len(combos) == 0:
                     if not hooks.target_count:
                         break
                     hooks.on_cycle_complete()
-                    if hooks.target_reached():
+                    if target_ready():
                         return target_met()
                     if cycle_new == 0:
                         return PlatformCollectionResult(
@@ -558,14 +581,15 @@ class BossCollector:
                             "来源组合已轮询，未发现新岗位；本轮目标未达成",
                         )
                     cycle_new = 0
-                if hooks.target_count and hooks.target_reached():
+                if target_ready():
                     return target_met()
                 if hooks.stop_event is not None and hooks.stop_event.is_set():
                     return PlatformCollectionResult(self.platform, "stopped", "user_stopped", "用户已停止")
                 # Only the explicitly resumed run supplies completed pages.
                 # New runs always start at page 1, regardless of older tasks.
-                combo_key = expect_id if request.mode == "recommend" else keyword
-                start_page = hooks.completed_page(city, combo_key) + 1
+                combo_key = expect_id if combo_mode == "recommend" else keyword
+                checkpoint_key = f"{combo_mode}:{combo_key}" if request.mode == "both" else combo_key
+                start_page = hooks.completed_page(city, checkpoint_key) + 1
                 if start_page > request.max_pages:
                     hooks.on_event(phase="resuming", keyword=combo_key, city=city,
                                    message="继续原任务：该搜索组合已完成")
@@ -573,16 +597,19 @@ class BossCollector:
                 combo_complete = True
                 page_fingerprints: set[frozenset[str]] = set()
                 for page in range(start_page, request.max_pages + 1):
-                    if hooks.target_count and hooks.target_reached():
+                    if target_ready():
                         return target_met()
                     if hooks.stop_event is not None and hooks.stop_event.is_set():
                         return PlatformCollectionResult(self.platform, "stopped", "user_stopped", "用户已停止")
                     hooks.on_event(phase="loading_list", keyword=combo_key, city=city, page=page)
+                    if request.mode == "both" and list_requests and throttle.wait(hooks.stop_event):
+                        return PlatformCollectionResult(self.platform, "stopped", "user_stopped", "用户已停止")
                     try:
                         if guard is not None:
                             guard.reserve("search_page", daily_limit=search_limit)
-                        params = build_boss_api_params(request, page, city_code, keyword, expect_id)
-                        if request.mode == "recommend":
+                        params = build_boss_api_params(replace(request, mode=combo_mode), page, city_code, keyword, expect_id)
+                        list_requests += 1
+                        if combo_mode == "recommend":
                             response = self.browser.request_boss_json(RECOMMEND_API_PATH, "GET", params)
                         else:
                             response = self.browser.request_boss_json(SEARCH_API_PATH, "POST", params)
@@ -628,6 +655,7 @@ class BossCollector:
                         continue
                     page_failures = 0
                     if not jobs:
+                        scanned_modes.add(combo_mode)
                         if has_more:
                             combo_complete = False
                             hooks.on_parse_failed("BOSS 列表接口返回空岗位，但仍提示存在下一页")
@@ -645,14 +673,14 @@ class BossCollector:
                         page_fingerprints.add(fingerprint)
                     seen_jobs += len(jobs)
                     for raw in jobs:
-                        if hooks.target_count and hooks.target_reached():
+                        if target_ready():
                             return target_met()
                         if hooks.stop_event is not None and hooks.stop_event.is_set():
                             return PlatformCollectionResult(self.platform, "stopped", "user_stopped", "用户已停止")
                         raw = _decode_fields(raw) if isinstance(raw, dict) else raw
                         candidate = self._list_candidate(
                             raw, city, city_code, keyword,
-                            mode=request.mode, expect_id=expect_id,
+                            mode=combo_mode, expect_id=expect_id,
                         )
                         if not candidate:
                             combo_complete = False
@@ -737,14 +765,19 @@ class BossCollector:
                         # The run entry point submits enabled AI tasks here;
                         # the collector can continue loading details.
                         hooks.on_prefilter_pass(merged)
-                        if hooks.target_count and hooks.target_reached():
+                        if target_ready():
                             return target_met()
                         if not continue_collecting:
                             return PlatformCollectionResult(self.platform, "completed", "callback_stopped", "采集回调已停止")
                     if not hooks.can_checkpoint():
                         combo_complete = False
                     if combo_complete:
-                        hooks.on_page_complete(city, combo_key, page)
+                        hooks.on_page_complete(city, checkpoint_key, page)
+                    scanned_modes.add(combo_mode)
+                    if target_ready():
+                        return target_met()
+                    if request.mode == "both" and hooks.target_count and hooks.target_reached():
+                        break
                     if not has_more:
                         break
                     if page < request.max_pages and _wait_or_stop(hooks.stop_event, 0.2 * delay_multiplier, self.sleep):
@@ -766,6 +799,8 @@ class BossCollector:
             )
         if request.mode == "recommend":
             return PlatformCollectionResult(self.platform, "completed", "recommendations_exhausted", "BOSS 本轮推荐页采集已结束")
+        if request.mode == "both":
+            return PlatformCollectionResult(self.platform, "completed", "sources_exhausted", "BOSS 本轮推荐流与搜索流采集已结束")
         return PlatformCollectionResult(self.platform, "completed", "search_exhausted", "BOSS 本轮搜索已结束")
 
     def _refresh_font_digits(self, target_id: str) -> bool:
