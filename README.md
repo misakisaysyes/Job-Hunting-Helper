@@ -25,7 +25,7 @@ Job Hunting Helper 是面向 BOSS 直聘的本地求职助手，用 AI 和批量
 - **仅沟通**：跟进未读、已读未回会话，按规则准备追问，确认后批量发送。
 - **有交换**：核实附件简历的发送或查看回执，记录已确认的投递结果。
 
-## 安装
+## 安装与使用
 
 环境：Python 3、Node.js 20.19+ 或 22.12+、Google Chrome。以下以 macOS 为例。
 
@@ -37,9 +37,7 @@ cd Job-Hunting-Helper
 
 脚本会自动安装依赖并启动服务，保持终端运行即可。
 
-## 使用
-
-先在另一个终端启动调试模式的 Chrome，并在打开的窗口登录 BOSS 直聘：
+在另一个终端启动调试模式的 Chrome，并在打开的窗口登录 BOSS 直聘：
 
 ```bash
 open -na "Google Chrome" --args \
@@ -54,12 +52,12 @@ open -na "Google Chrome" --args \
 3. **监测**：扫描“仅沟通”和“有交换”，按需追问、核实投递。
 4. **复盘**：在工作台选择日期，生成桑基图或折线图，查看转化情况。
 
-## 配置与架构
+## 配置
 
-展开查看完整说明，或单独打开 [Web 端配置](config.md) 与 [技术架构](tech.md)。
+完整配置见 [config.md](config.md)。
 
 <details>
-<summary>Web 端配置</summary>
+<summary>展开配置说明</summary>
 
 <!-- BEGIN INLINE:config.md -->
 在侧栏打开“配置”，依次设置岗位来源、筛选规则和处理方式，最后点击“生效配置”。
@@ -123,8 +121,12 @@ API Key 留空会保留已保存的密钥，页面只显示配置状态。“思
 
 </details>
 
+## 技术架构
+
+架构说明见 [tech.md](tech.md)。
+
 <details>
-<summary>技术架构</summary>
+<summary>展开架构说明</summary>
 
 <!-- BEGIN INLINE:tech.md -->
 项目采用本地 Web 架构：React 提供操作界面，Python 执行采集、监测和 AI 任务，SQLite 保存结果；浏览器与模型服务分别负责访问 BOSS 直聘和生成内容。
