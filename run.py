@@ -71,15 +71,12 @@ def validate_run_config(config: dict[str, Any]) -> dict[str, Any]:
     if collection["mode"] == "both" and not collection["keywords"]:
         raise ValueError("--mode both 需要至少一个 --keyword")
     cities = collection["cities"]
+    if "city" in collection or "city_code" in collection:
+        raise ValueError("collection.city 和 collection.city_code 已移除，请仅配置 collection.cities")
     invalid_cities = [city for city in cities if not isinstance(city, str) or city not in CITY_CODES]
     if invalid_cities:
         raise ValueError(f"collection.cities 含未收录城市：{invalid_cities}")
     collection["cities"] = list(dict.fromkeys(cities))
-    if collection["city_code"] and not collection["city"]:
-        raise ValueError("--city-code 需要同时提供 --city")
-    city_code = (collection["city_code"] or CITY_CODES.get(collection["city"])) if collection["city"] else None
-    if collection["city"] and not city_code:
-        raise ValueError(f"未收录城市 {collection['city']}；请提供 --city-code")
     if not 1 <= collection["max_pages"] <= 10 or collection["max_jobs"] < 0:
         raise ValueError("--max-pages 必须在 1～10，--max-jobs 不能为负")
     if (type(collection["target_jobs"]) is not int or collection["target_jobs"] < 1):

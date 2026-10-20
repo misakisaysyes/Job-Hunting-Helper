@@ -1,0 +1,241 @@
+{
+  "schema_version": 1,
+  "title": "采集工作流",
+  "repository": {
+    "url": "https://github.com/misakisaysyes/Job-Hunting-Helper.git",
+    "revision": "a3f70b0dcaeef3056e65b43d06b142869ca2ed20"
+  },
+  "steps": [
+    {
+      "id": "fetch",
+      "title": "获取岗位",
+      "summary": "选择岗位来源，开始采集。",
+      "items": [
+        [
+          "推荐流",
+          "获取 BOSS 根据求职期望推荐的岗位。"
+        ],
+        [
+          "搜索流",
+          "按城市和关键词搜索岗位。"
+        ],
+        [
+          "组合模式",
+          "先推荐、后搜索，未达目标继续下一轮。"
+        ]
+      ],
+      "links": [
+        {
+          "path": "config.py",
+          "line": 49,
+          "end_line": 52,
+          "label": "推荐流配置"
+        },
+        {
+          "path": "config.py",
+          "line": 55,
+          "end_line": 58,
+          "label": "搜索流配置"
+        }
+      ],
+      "sources": [
+        {
+          "path": "collector/platforms/boss.py",
+          "line": 609,
+          "end_line": 615,
+          "label": "请求相应的岗位来源"
+        }
+      ],
+      "subtitle": "推荐流 / 搜索流"
+    },
+    {
+      "id": "filter",
+      "title": "预筛",
+      "summary": "先去重，再按求职条件排除不合适的岗位。",
+      "items": [
+        [
+          "筛选条件",
+          "薪资、学历、工作年限、公司规模、招聘类型，以及岗位、公司排除词和猎头规则。"
+        ],
+        [
+          "筛选结果",
+          "通过预筛的岗位保存到岗位池；不符合条件或薪资解码失败的岗位会跳过。"
+        ]
+      ],
+      "links": [
+        {
+          "path": "config.py",
+          "line": 103,
+          "end_line": 121,
+          "label": "学历、年限与薪资等预筛条件"
+        },
+        {
+          "path": "config.py",
+          "line": 122,
+          "end_line": 129,
+          "label": "排除词与猎头规则"
+        }
+      ],
+      "sources": [
+        {
+          "path": "collector/orchestrator.py",
+          "line": 52,
+          "end_line": 64,
+          "label": "跳过本轮和已入库重复岗位"
+        },
+        {
+          "path": "collector/platforms/boss.py",
+          "line": 758,
+          "end_line": 767,
+          "label": "详情预筛通过后接收入库"
+        }
+      ],
+      "subtitle": "按求职条件筛选"
+    },
+    {
+      "id": "score",
+      "title": "AI评分（可选）",
+      "summary": "由 AI 结合岗位详情和简历，给出匹配分数与理由。",
+      "items": [
+        [
+          "如何流转",
+          "达到评分门槛后进入“打招呼”阶段；低分或评分失败的岗位保留，供你复核。"
+        ],
+        [
+          "可选步骤",
+          "关闭 AI 评分后，通过预筛的岗位直接进入“打招呼”阶段。"
+        ]
+      ],
+      "links": [
+        {
+          "path": "config.py",
+          "line": 131,
+          "end_line": 143,
+          "label": "AI 评分开关、要求与门槛"
+        },
+        {
+          "path": "config.py",
+          "line": 100,
+          "end_line": 102,
+          "label": "简历路径"
+        },
+        {
+          "path": "config.py",
+          "line": 144,
+          "end_line": 168,
+          "label": "模型服务与请求设置"
+        }
+      ],
+      "sources": [
+        {
+          "path": "score.py",
+          "line": 47,
+          "end_line": 58,
+          "label": "将岗位与简历交给模型评估"
+        },
+        {
+          "path": "run.py",
+          "line": 261,
+          "end_line": 285,
+          "label": "记录评分并判断是否达标"
+        }
+      ],
+      "subtitle": "结合简历评估匹配度"
+    },
+    {
+      "id": "greeting",
+      "title": "生成招呼",
+      "summary": "为选定的岗位准备招呼语，由你检查、编辑并保存。",
+      "items": [
+        [
+          "准备方式",
+          "开启 AI 招呼时，结合简历与岗位生成文案；关闭时使用固定模板，也可以自行编写。"
+        ],
+        [
+          "发送之前",
+          "可调整生成要求或编辑当前草稿，确认内容后再发送。"
+        ]
+      ],
+      "links": [
+        {
+          "path": "config.py",
+          "line": 134,
+          "end_line": 141,
+          "label": "招呼语开关、提示词与模板"
+        },
+        {
+          "path": "config.py",
+          "line": 100,
+          "end_line": 102,
+          "label": "简历路径"
+        }
+      ],
+      "sources": [
+        {
+          "path": "web/src/features/jobs/GreetingComposer.jsx",
+          "line": 36,
+          "end_line": 60,
+          "label": "生成、编辑和保存招呼语"
+        },
+        {
+          "path": "web/src/features/config/configLayout.js",
+          "line": 61,
+          "end_line": 68,
+          "label": "评分与招呼语配置"
+        }
+      ],
+      "subtitle": "AI 生成 / 固定模板\n均可手动编辑"
+    },
+    {
+      "id": "send",
+      "title": "发送招呼",
+      "summary": "由你确认后发送招呼，并核实实际发送结果。",
+      "items": [
+        [
+          "发送成功",
+          "只有核实成功，岗位才会标记为“已招呼”，后续可通过监测跟进。"
+        ],
+        [
+          "结果未明",
+          "保留当前记录供人工核查，系统不会自动重发。"
+        ]
+      ],
+      "links": [
+        {
+          "path": "config.py",
+          "line": 93,
+          "end_line": 99,
+          "label": "浏览器连接与后台运行"
+        },
+        {
+          "path": "web/src/features/jobs/GreetingComposer.jsx",
+          "line": 62,
+          "end_line": 72,
+          "label": "发送前的人工确认"
+        },
+        {
+          "path": "api/jobs.py",
+          "line": 141,
+          "end_line": 169,
+          "label": "发送与结果核实"
+        }
+      ],
+      "sources": [
+        {
+          "path": "web/src/features/jobs/GreetingComposer.jsx",
+          "line": 62,
+          "end_line": 72,
+          "label": "用户确认后发送"
+        },
+        {
+          "path": "api/jobs.py",
+          "line": 141,
+          "end_line": 169,
+          "label": "发送招呼并核验结果"
+        }
+      ],
+      "codeLabel": "配置与发送代码",
+      "subtitle": "人工确认后发送"
+    }
+  ]
+}

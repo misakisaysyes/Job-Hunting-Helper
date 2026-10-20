@@ -11,7 +11,8 @@ from pathlib import Path
 from threading import Lock
 import tempfile
 
-from config import CITY_CODES, DEFAULT_CONFIG, MONITORING_CONFIG, PROJECT_ROOT, USER_CONFIG_PATH
+from config import (CITY_CODES, DEFAULT_CONFIG, MONITORING_CONFIG, PROJECT_ROOT,
+                    USER_CONFIG_PATH, migrate_collection_cities)
 from ai.credentials import (activate_api_key, current_api_key, key_pending_apply,
                             save_api_key, saved_key_configured)
 from run import validate_run_config
@@ -23,7 +24,7 @@ class SettingsError(ValueError):
 
 _LOCK = Lock()
 _BASIC_KEYS = {
-    "collection": {"mode", "encrypt_expect_id", "keywords"},
+    "collection": {"mode", "encrypt_expect_id", "keywords", "cities"},
     "browser": {"cdp_url", "silent_background"},
     "profile": {"resume_path"},
     "ai": {"use_ai_score", "use_ai_greeting"},
@@ -33,11 +34,24 @@ _BASIC_KEYS = {
                    "followup_cooldown_hours", "followup_max_count", "followup_review_required",
                    "filter_review_required"},
 }
-_EMPTY_STRINGS = {("collection", "city"), ("collection", "city_code"),
-                  ("ai", "score_user_prompt"), ("ai", "greeting_user_prompt"),
+_EMPTY_STRINGS = {("ai", "score_user_prompt"), ("ai", "greeting_user_prompt"),
                   ("ai", "greeting_template")}
 RESUME_UPLOAD_DIR = PROJECT_ROOT / ".state" / "resumes"
 MAX_RESUME_BYTES = 1024 * 1024
+
+
+def _read_saved_overrides() -> dict:
+    if not USER_CONFIG_PATH.is_file():
+        return {}
+    saved = json.loads(USER_CONFIG_PATH.read_text(encoding="utf-8"))
+    if not isinstance(saved, dict):
+        raise SettingsError("已保存的配置格式错误")
+    if isinstance(saved.get("collection"), dict):
+        try:
+            saved["collection"] = migrate_collection_cities(saved["collection"])
+        except ValueError as exc:
+            raise SettingsError(str(exc)) from exc
+    return saved
 
 
 def _current_values() -> dict:
@@ -73,14 +87,10 @@ def read_basic_settings() -> dict:
 def read_full_settings() -> dict:
     active = {**deepcopy(DEFAULT_CONFIG), "monitoring": deepcopy(MONITORING_CONFIG)}
     saved = deepcopy(active)
-    if USER_CONFIG_PATH.is_file():
-        overrides = json.loads(USER_CONFIG_PATH.read_text(encoding="utf-8"))
-        if not isinstance(overrides, dict):
-            raise SettingsError("已保存的配置格式错误")
-        for section, fields in overrides.items():
-            if section in saved and isinstance(fields, dict):
-                saved[section].update({key: deepcopy(value) for key, value in fields.items()
-                                       if key in saved[section]})
+    for section, fields in _read_saved_overrides().items():
+        if section in saved and isinstance(fields, dict):
+            saved[section].update({key: deepcopy(value) for key, value in fields.items()
+                                   if key in saved[section]})
     return {"settings": saved, "city_options": list(CITY_CODES),
             "api_key_configured": saved_key_configured(),
             "pending_apply": saved != active or key_pending_apply()}
@@ -179,11 +189,7 @@ def save_full_settings(payload: object) -> dict:
         except (ValueError, KeyError, TypeError) as exc:
             raise SettingsError(str(exc)) from exc
         _validate_monitoring(monitoring_config)
-        current: dict = {}
-        if USER_CONFIG_PATH.is_file():
-            current = json.loads(USER_CONFIG_PATH.read_text(encoding="utf-8"))
-            if not isinstance(current, dict):
-                raise SettingsError("已保存的配置格式错误")
+        current = _read_saved_overrides()
         for section, fields in normalized.items():
             current.setdefault(section, {}).update(fields)
         USER_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -235,7 +241,7 @@ def _validate_monitoring(config: dict) -> None:
 
 def _validate_value(section: str, key: str, value: object) -> object:
     name = f"{section}.{key}"
-    if key in {"encrypt_expect_id", "keywords"}:
+    if key in {"encrypt_expect_id", "keywords", "cities"}:
         values = _string_list(value, name)
         if key == "encrypt_expect_id" and any("," in item for item in values):
             raise SettingsError("求职期望 ID 请逐项填写，不要在单项内输入逗号")
@@ -281,11 +287,7 @@ def save_basic_settings(payload: object) -> dict:
         except (ValueError, KeyError, TypeError) as exc:
             raise SettingsError(str(exc)) from exc
         _validate_monitoring(monitoring_config)
-        current: dict = {}
-        if USER_CONFIG_PATH.is_file():
-            current = json.loads(USER_CONFIG_PATH.read_text(encoding="utf-8"))
-            if not isinstance(current, dict):
-                raise SettingsError("已保存的配置格式错误")
+        current = _read_saved_overrides()
         for section, fields in normalized.items():
             current.setdefault(section, {}).update(fields)
         USER_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)

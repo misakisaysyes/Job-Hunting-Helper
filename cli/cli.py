@@ -60,8 +60,6 @@ CONFIG_OPTIONS = {
     "test_prefilter": ("collection", "test_prefilter"),
     "keyword": ("collection", "keywords"),
     "search_city": ("collection", "cities"),
-    "city": ("collection", "city"),
-    "city_code": ("collection", "city_code"),
     "max_pages": ("collection", "max_pages"),
     "target_jobs": ("collection", "target_jobs"),
     "max_jobs": ("collection", "max_jobs"),
@@ -136,8 +134,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--keyword", action="append", help="搜索流的搜索词，可重复")
     parser.add_argument("--search-city", action="append", choices=list(CITY_CODES),
                         help="搜索流城市，可重复指定；省略时按 BOSS 当前会话城市搜索")
-    parser.add_argument("--city", help="城市名称；不提供则不指定城市")
-    parser.add_argument("--city-code", help="不在内置城市表时指定 BOSS 城市编码")
     parser.add_argument("--max-pages", type=int, help="最多读取的列表页数，1～10")
     parser.add_argument("--target-jobs", type=int, help="本轮目标采集数；未达到时轮询来源组合")
     parser.add_argument("--max-jobs", type=int, help="最多输出的岗位数；0 表示不限")

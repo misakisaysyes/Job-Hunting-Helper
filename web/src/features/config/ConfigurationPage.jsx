@@ -26,7 +26,7 @@ async function waitForApiRestart(previousInstanceId) {
   throw new Error("API 服务仍在重启，请稍后刷新页面查看状态");
 }
 
-function toDraft(settings, cityOptions = []) {
+function toDraft(settings) {
   const draft = Object.fromEntries(Object.entries(settings).map(([section, fields]) => [
     section,
     Object.fromEntries(Object.entries(fields).map(([key, value]) => [
@@ -34,9 +34,6 @@ function toDraft(settings, cityOptions = []) {
     ])),
   ]));
   draft.browser.silent_background = settings.browser.silent_background === true;
-  if (!draft.collection.cities.length && cityOptions.includes(draft.collection.city)) {
-    draft.collection.cities = [draft.collection.city];
-  }
   return draft;
 }
 
@@ -58,15 +55,9 @@ function toPayload(draft, settings) {
   if (payload.collection.mode === "recommend") {
     payload.collection.keywords = [];
     payload.collection.cities = [];
-    payload.collection.city = "";
-    payload.collection.city_code = "";
   }
   if (payload.collection.mode === "search") {
     payload.collection.encrypt_expect_id = [];
-  }
-  if (payload.collection.mode === "search" || payload.collection.mode === "both") {
-    payload.collection.city = "";
-    payload.collection.city_code = "";
   }
   payload.collection.max_jobs = 0;
   delete payload.ai.api_key_env;
@@ -143,7 +134,7 @@ export default function ConfigurationPage() {
       if (!active) return;
       setSettings(result.settings);
       setCityOptions(result.city_options || []);
-      setDraft(toDraft(result.settings, result.city_options || []));
+      setDraft(toDraft(result.settings));
       setPendingApply(Boolean(result.pending_apply));
       setApiKeyConfigured(Boolean(result.api_key_configured));
       setNotice(null);
@@ -169,7 +160,7 @@ export default function ConfigurationPage() {
     const result = await saveFullSettings(payload);
     setSettings(result.settings);
     setCityOptions(result.city_options || cityOptions);
-    setDraft(toDraft(result.settings, result.city_options || cityOptions));
+    setDraft(toDraft(result.settings));
     setDirty(false);
     setPendingApply(Boolean(result.pending_apply));
     setApiKeyConfigured(Boolean(result.api_key_configured));

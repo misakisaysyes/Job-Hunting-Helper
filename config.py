@@ -7,7 +7,7 @@ from pathlib import Path
 # 项目根目录，用于构造不依赖当前工作目录的默认文件路径。
 PROJECT_ROOT = Path(__file__).resolve().parent
 
-# 内置城市名称与 BOSS 城市编码的对应表；未收录的城市可用 city_code 指定编码。
+# 内置城市名称与 BOSS 城市编码的对应表；城市编码由此表自动匹配。
 CITY_CODES = {
     "北京": "101010100", "上海": "101020100", "深圳": "101280600",
     "广州": "101280100", "杭州": "101210100", "成都": "101270100",
@@ -56,10 +56,6 @@ DEFAULT_CONFIG = {
         "keywords": [],
         # 搜索流可多选内置城市；空列表表示按 BOSS 当前会话的城市搜索。
         "cities": [],
-        # 目标城市名称；空字符串表示不指定城市，由 BOSS 当前会话决定范围。
-        "city": "",
-        # city 对应的 BOSS 城市编码；空字符串时从 CITY_CODES 查找。
-        "city_code": "",
         # 每个搜索词与城市组合最多读取的列表页数，范围 1～10。
         "max_pages": 1,
         # 本轮希望获得的预筛通过且（启用 AI 评分时）达到评分门槛的岗位数，正整数。
@@ -190,6 +186,22 @@ MONITORING_CONFIG = {
     "filter_review_required": True,
 }
 
+
+def migrate_collection_cities(fields: dict) -> dict:
+    """Convert saved single-city settings to the sole cities configuration."""
+    fields = fields.copy()
+    old_city = fields.pop("city", "")
+    fields.pop("city_code", None)
+    if old_city:
+        if not isinstance(old_city, str) or old_city not in CITY_CODES:
+            raise ValueError("旧城市配置无法自动迁移，请在 collection.cities 中选择内置城市")
+        cities = fields.get("cities", [])
+        if not isinstance(cities, list):
+            raise ValueError("collection.cities 必须是列表")
+        fields["cities"] = [*cities] if old_city in cities else [*cities, old_city]
+    return fields
+
+
 # Web 保存的用户设置覆盖上述默认值；CLI 未指定的参数也读取这些设置。
 USER_CONFIG_PATH = PROJECT_ROOT / ".state" / "user-config.json"
 if USER_CONFIG_PATH.is_file():
@@ -201,6 +213,8 @@ if USER_CONFIG_PATH.is_file():
             _target = MONITORING_CONFIG if _section == "monitoring" else DEFAULT_CONFIG.get(_section)
             if _target is None or not isinstance(_values, dict):
                 continue
+            if _section == "collection":
+                _values = migrate_collection_cities(_values)
             for _key, _value in _values.items():
                 if _key in _target:
                     _target[_key] = _value

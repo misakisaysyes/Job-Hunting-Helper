@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="获取岗位、预筛、AI评分、生成招呼、发送招呼：点击节点查看说明与配置代码。">
+<title>采集工作流 · Job Hunting Helper</title><style>
+:root { color-scheme:light; --ink:#26364d; --muted:#71829b; --blue:#1677ed; --line:#dce6f2; --paper:#fff; }
+* { box-sizing:border-box; } [hidden] { display:none!important; }
+body { margin:0; background:#f6f8fb; color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; line-height:1.7; }
+main { max-width:1240px; margin:0 auto; padding:48px 40px 30px; }
+header { display:flex; justify-content:space-between; align-items:center; gap:20px; margin-bottom:25px; }
+h1 { margin:0 0 8px; font-size:30px; line-height:1.35; letter-spacing:-.5px; }
+header p { margin:0; color:var(--muted); font-size:14px; }
+.project { color:var(--muted); text-decoration:none; font-size:12px; white-space:nowrap; }
+.workflow { padding:30px; border:1px solid var(--line); border-radius:16px; background:var(--paper); }
+.diagram-scroll { overflow-x:auto; padding:7px 0 27px; scrollbar-width:thin; scrollbar-color:#c5d1df transparent; }
+.diagram-scroll svg { display:block; width:100%; min-width:680px; height:auto; overflow:visible; font-family:inherit; }
+.detail-panels { position:relative; --anchor:9%; border:1px solid #c8dcf5; border-radius:12px; background:#fff; }
+.detail-panels::before { content:""; position:absolute; top:-7px; left:calc(var(--anchor) - 7px); width:12px; height:12px; transform:rotate(45deg); border-top:1px solid #c8dcf5; border-left:1px solid #c8dcf5; background:#fff; }
+.step-panel { padding:25px 27px 19px; }
+.panel-body { display:grid; grid-template-columns:300px 1fr; gap:38px; min-height:143px; }
+.step-heading { display:flex; align-items:center; gap:10px; margin:0 0 10px; font-size:20px; line-height:1.5; }
+.step-number { display:inline-flex; align-items:center; justify-content:center; width:29px; height:29px; border-radius:8px; background:#eaf3ff; color:#1677ed; font-size:12px; font-weight:700; }
+.summary { margin:0; font-size:14px; color:#506781; line-height:1.9; }
+dl { margin:3px 0 0; display:grid; gap:13px; align-content:start; font-size:13px; }
+.fact { display:grid; grid-template-columns:72px 1fr; gap:10px; } dt { font-weight:650; } dd { margin:0; color:#61748f; }
+.config-links { display:flex; gap:9px; align-items:center; flex-wrap:wrap; border-top:1px solid #e8eef6; padding-top:17px; margin-top:16px; }
+.links-label { margin-right:4px; color:var(--muted); font-size:12px; }
+.config-link { display:inline-flex; align-items:center; gap:10px; text-decoration:none; border:1px solid #cadcf1; border-radius:7px; padding:6px 11px; background:#f7faff; color:#176dcc; font-size:12px; font-weight:600; }
+.config-link:hover { border-color:#1677ed; background:#eef6ff; } a:focus-visible,input:focus-visible { outline:2px solid #1677ed; outline-offset:3px; }
+.footer { margin-top:17px; display:flex; align-items:flex-start; justify-content:space-between; gap:20px; font-size:11px; color:#8997a9; }
+.footer a { color:#7a8ca4; text-decoration:none; } .footer a:hover { color:#1677ed; }
+@media (max-width:900px) { main{padding:30px 20px;} .workflow{padding:20px;} .panel-body{grid-template-columns:1fr;gap:18px;min-height:0;} .step-panel{padding:21px;} .footer{flex-wrap:wrap;} header{align-items:flex-start;} .project{display:none;} }
+@media print { main{padding:0;} .project,.footer,.config-links{display:none;} .workflow{padding:16px;border:0;} .diagram-scroll svg{min-width:0;} .step-panel[hidden]{display:block!important;} .detail-panels::before{display:none;} .step-panel + .step-panel{border-top:1px solid #ddd;} }
+</style></head>
+<body><main>
+<header><div><h1>采集工作流</h1><p>点击节点查看说明，面板中的链接可定位到相关配置代码。</p></div><a class="project" href="https://github.com/misakisaysyes/Job-Hunting-Helper" target="_blank" rel="noopener noreferrer">Job Hunting Helper ↗</a></header>
+<div class="workflow"><div class="diagram-scroll"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 964 140" width="964" height="140" role="group" aria-labelledby="collection-title collection-description"><title id="collection-title">采集工作流</title><desc id="collection-description">获取岗位 → 预筛 → AI评分（可选） → 生成招呼 → 发送招呼</desc><style>
+svg { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+.node-surface { fill:#f5f9ff; stroke:#c4d9f1; stroke-width:1.25; }
+.node-title { fill:#26364d; font-size:16px; font-weight:650; }
+.node-subtitle { fill:#71829b; font-size:11px; }
+.node-number { fill:#829ab6; font-size:10px; font-weight:600; }
+.connector { fill:none; stroke:#9fb4cd; stroke-width:1.5; }
+.arrow-tip { fill:#9fb4cd; }
+
+.workflow-node { cursor:pointer; outline:none; }
+.workflow-node:hover .node-surface,.workflow-node:focus-visible .node-surface { stroke:#1677ed; fill:#edf5ff; stroke-width:1.8; }
+.workflow-node[aria-pressed="true"] .node-surface { stroke:#1677ed; fill:#eaf3ff; stroke-width:1.8; }
+.workflow-node[aria-pressed="true"] .node-title { fill:#1269cb; }
+</style><defs><marker id="collection-arrow" markerWidth="8" markerHeight="7" refX="7" refY="3.5" orient="auto"><path class="arrow-tip" d="M 0 0 L 8 3.5 L 0 7 Z"/></marker></defs><path class="connector" d="M 176 70 H 210" marker-end="url(#collection-arrow)"/><path class="connector" d="M 368 70 H 402" marker-end="url(#collection-arrow)"/><path class="connector" d="M 560 70 H 594" marker-end="url(#collection-arrow)"/><path class="connector" d="M 752 70 H 786" marker-end="url(#collection-arrow)"/><g class="workflow-node" id="node-fetch" data-node-id="fetch" tabindex="0" role="button" aria-label="获取岗位" aria-controls="panel-fetch" aria-pressed="true"><title>获取岗位 · 推荐流 / 搜索流</title><rect class="node-surface" x="22" y="20" width="152" height="100" rx="11"/><text class="node-number" x="35" y="39">01</text><text class="node-title" x="98" y="65" text-anchor="middle">获取岗位</text><text class="node-subtitle" x="98" y="86" text-anchor="middle"><tspan x="98" dy="0">推荐流 / 搜索流</tspan></text></g><g class="workflow-node" id="node-filter" data-node-id="filter" tabindex="0" role="button" aria-label="预筛" aria-controls="panel-filter" aria-pressed="false"><title>预筛 · 按求职条件筛选</title><rect class="node-surface" x="214" y="20" width="152" height="100" rx="11"/><text class="node-number" x="227" y="39">02</text><text class="node-title" x="290" y="65" text-anchor="middle">预筛</text><text class="node-subtitle" x="290" y="86" text-anchor="middle"><tspan x="290" dy="0">按求职条件筛选</tspan></text></g><g class="workflow-node" id="node-score" data-node-id="score" tabindex="0" role="button" aria-label="AI评分（可选）" aria-controls="panel-score" aria-pressed="false"><title>AI评分（可选） · 结合简历评估匹配度</title><rect class="node-surface" x="406" y="20" width="152" height="100" rx="11"/><text class="node-number" x="419" y="39">03</text><text class="node-title" x="482" y="65" text-anchor="middle">AI评分（可选）</text><text class="node-subtitle" x="482" y="86" text-anchor="middle"><tspan x="482" dy="0">结合简历评估匹配度</tspan></text></g><g class="workflow-node" id="node-greeting" data-node-id="greeting" tabindex="0" role="button" aria-label="生成招呼" aria-controls="panel-greeting" aria-pressed="false"><title>生成招呼 · AI 生成 / 固定模板
+均可手动编辑</title><rect class="node-surface" x="598" y="20" width="152" height="100" rx="11"/><text class="node-number" x="611" y="39">04</text><text class="node-title" x="674" y="65" text-anchor="middle">生成招呼</text><text class="node-subtitle" x="674" y="86" text-anchor="middle"><tspan x="674" dy="0">AI 生成 / 固定模板</tspan><tspan x="674" dy="16">均可手动编辑</tspan></text></g><g class="workflow-node" id="node-send" data-node-id="send" tabindex="0" role="button" aria-label="发送招呼" aria-controls="panel-send" aria-pressed="false"><title>发送招呼 · 人工确认后发送</title><rect class="node-surface" x="790" y="20" width="152" height="100" rx="11"/><text class="node-number" x="803" y="39">05</text><text class="node-title" x="866" y="65" text-anchor="middle">发送招呼</text><text class="node-subtitle" x="866" y="86" text-anchor="middle"><tspan x="866" dy="0">人工确认后发送</tspan></text></g></svg></div>
+<div class="detail-panels"><section class="step-panel" id="panel-fetch" role="region" aria-labelledby="title-fetch"><div class="panel-body"><div><h2 class="step-heading" id="title-fetch"><span class="step-number">01</span>获取岗位</h2><p class="summary">选择岗位来源，开始采集。</p></div><dl><div class="fact"><dt>推荐流</dt><dd>获取 BOSS 根据求职期望推荐的岗位。</dd></div><div class="fact"><dt>搜索流</dt><dd>按城市和关键词搜索岗位。</dd></div><div class="fact"><dt>组合模式</dt><dd>先推荐、后搜索，未达目标继续下一轮。</dd></div></dl></div><nav class="config-links" aria-label="获取岗位相关配置代码"><span class="links-label">相关配置代码</span><a class="config-link" href="https://github.com/misakisaysyes/Job-Hunting-Helper/blob/a3f70b0dcaeef3056e65b43d06b142869ca2ed20/config.py#L49-L52" target="_blank" rel="noopener noreferrer" title="config.py:49–52">推荐流配置 <span aria-hidden="true">↗</span></a><a class="config-link" href="https://github.com/misakisaysyes/Job-Hunting-Helper/blob/a3f70b0dcaeef3056e65b43d06b142869ca2ed20/config.py#L55-L58" target="_blank" rel="noopener noreferrer" title="config.py:55–58">搜索流配置 <span aria-hidden="true">↗</span></a></nav></section><section class="step-panel" id="panel-filter" role="region" aria-labelledby="title-filter" hidden><div class="panel-body"><div><h2 class="step-heading" id="title-filter"><span class="step-number">02</span>预筛</h2><p class="summary">先去重，再按求职条件排除不合适的岗位。</p></div><dl><div class="fact"><dt>筛选条件</dt><dd>薪资、学历、工作年限、公司规模、招聘类型，以及岗位、公司排除词和猎头规则。</dd></div><div class="fact"><dt>筛选结果</dt><dd>通过预筛的岗位保存到岗位池；不符合条件或薪资解码失败的岗位会跳过。</dd></div></dl></div><nav class="config-links" aria-label="预筛相关配置代码"><span class="links-label">相关配置代码</span><a class="config-link" href="https://github.com/misakisaysyes/Job-Hunting-Helper/blob/a3f70b0dcaeef3056e65b43d06b142869ca2ed20/config.py#L103-L121" target="_blank" rel="noopener noreferrer" title="config.py:103–121">学历、年限与薪资等预筛条件 <span aria-hidden="true">↗</span></a><a class="config-link" href="https://github.com/misakisaysyes/Job-Hunting-Helper/blob/a3f70b0dcaeef3056e65b43d06b142869ca2ed20/config.py#L122-L129" target="_blank" rel="noopener noreferrer" title="config.py:122–129">排除词与猎头规则 <span aria-hidden="true">↗</span></a></nav></section><section class="step-panel" id="panel-score" role="region" aria-labelledby="title-score" hidden><div class="panel-body"><div><h2 class="step-heading" id="title-score"><span class="step-number">03</span>AI评分（可选）</h2><p class="summary">由 AI 结合岗位详情和简历，给出匹配分数与理由。</p></div><dl><div class="fact"><dt>如何流转</dt><dd>达到评分门槛后进入“打招呼”阶段；低分或评分失败的岗位保留，供你复核。</dd></div><div class="fact"><dt>可选步骤</dt><dd>关闭 AI 评分后，通过预筛的岗位直接进入“打招呼”阶段。</dd></div></dl></div><nav class="config-links" aria-label="AI评分（可选）相关配置代码"><span class="links-label">相关配置代码</span><a class="config-link" href="https://github.com/misakisaysyes/Job-Hunting-Helper/blob/a3f70b0dcaeef3056e65b43d06b142869ca2ed20/config.py#L131-L143" target="_blank" rel="noopener noreferrer" title="config.py:131–143">AI 评分开关、要求与门槛 <span aria-hidden="true">↗</span></a><a class="config-link" href="https://github.com/misakisaysyes/Job-Hunting-Helper/blob/a3f70b0dcaeef3056e65b43d06b142869ca2ed20/config.py#L100-L102" target="_blank" rel="noopener noreferrer" title="config.py:100–102">简历路径 <span aria-hidden="true">↗</span></a><a class="config-link" href="https://github.com/misakisaysyes/Job-Hunting-Helper/blob/a3f70b0dcaeef3056e65b43d06b142869ca2ed20/config.py#L144-L168" target="_blank" rel="noopener noreferrer" title="config.py:144–168">模型服务与请求设置 <span aria-hidden="true">↗</span></a></nav></section><section class="step-panel" id="panel-greeting" role="region" aria-labelledby="title-greeting" hidden><div class="panel-body"><div><h2 class="step-heading" id="title-greeting"><span class="step-number">04</span>生成招呼</h2><p class="summary">为选定的岗位准备招呼语，由你检查、编辑并保存。</p></div><dl><div class="fact"><dt>准备方式</dt><dd>开启 AI 招呼时，结合简历与岗位生成文案；关闭时使用固定模板，也可以自行编写。</dd></div><div class="fact"><dt>发送之前</dt><dd>可调整生成要求或编辑当前草稿，确认内容后再发送。</dd></div></dl></div><nav class="config-links" aria-label="生成招呼相关配置代码"><span class="links-label">相关配置代码</span><a class="config-link" href="https://github.com/misakisaysyes/Job-Hunting-Helper/blob/a3f70b0dcaeef3056e65b43d06b142869ca2ed20/config.py#L134-L141" target="_blank" rel="noopener noreferrer" title="config.py:134–141">招呼语开关、提示词与模板 <span aria-hidden="true">↗</span></a><a class="config-link" href="https://github.com/misakisaysyes/Job-Hunting-Helper/blob/a3f70b0dcaeef3056e65b43d06b142869ca2ed20/config.py#L100-L102" target="_blank" rel="noopener noreferrer" title="config.py:100–102">简历路径 <span aria-hidden="true">↗</span></a></nav></section><section class="step-panel" id="panel-send" role="region" aria-labelledby="title-send" hidden><div class="panel-body"><div><h2 class="step-heading" id="title-send"><span class="step-number">05</span>发送招呼</h2><p class="summary">由你确认后发送招呼，并核实实际发送结果。</p></div><dl><div class="fact"><dt>发送成功</dt><dd>只有核实成功，岗位才会标记为“已招呼”，后续可通过监测跟进。</dd></div><div class="fact"><dt>结果未明</dt><dd>保留当前记录供人工核查，系统不会自动重发。</dd></div></dl></div><nav class="config-links" aria-label="发送招呼相关配置代码"><span class="links-label">配置与发送代码</span><a class="config-link" href="https://github.com/misakisaysyes/Job-Hunting-Helper/blob/a3f70b0dcaeef3056e65b43d06b142869ca2ed20/config.py#L93-L99" target="_blank" rel="noopener noreferrer" title="config.py:93–99">浏览器连接与后台运行 <span aria-hidden="true">↗</span></a><a class="config-link" href="https://github.com/misakisaysyes/Job-Hunting-Helper/blob/a3f70b0dcaeef3056e65b43d06b142869ca2ed20/web/src/features/jobs/GreetingComposer.jsx#L62-L72" target="_blank" rel="noopener noreferrer" title="web/src/features/jobs/GreetingComposer.jsx:62–72">发送前的人工确认 <span aria-hidden="true">↗</span></a><a class="config-link" href="https://github.com/misakisaysyes/Job-Hunting-Helper/blob/a3f70b0dcaeef3056e65b43d06b142869ca2ed20/api/jobs.py#L141-L169" target="_blank" rel="noopener noreferrer" title="api/jobs.py:141–169">发送与结果核实 <span aria-hidden="true">↗</span></a></nav></section></div></div>
+<div class="footer"><div><a href="collection-workflow.json">流程源文件</a></div>
+<span>配置链接指向 GitHub 源码的对应行</span></div>
+<noscript><style>.step-panel[hidden]{display:block!important}.detail-panels::before{display:none}</style></noscript>
+</main><script>
+const nodes = Array.from(document.querySelectorAll('[data-node-id]'));
+const panels = Array.from(document.querySelectorAll('.step-panel'));
+const details = document.querySelector('.detail-panels');
+let selected = 'fetch';
+function positionAnchor() {
+  const node = nodes.find(item => item.dataset.nodeId === selected);
+  const rect = node.getBoundingClientRect();
+  const panelRect = details.getBoundingClientRect();
+  const center = rect.left + rect.width / 2 - panelRect.left;
+  details.style.setProperty('--anchor', Math.max(16, Math.min(panelRect.width - 16, center)) + 'px');
+}
+function selectStep(id, updateUrl = true) {
+  if (!nodes.some(item => item.dataset.nodeId === id)) id = 'fetch';
+  selected = id;
+  nodes.forEach(item => item.setAttribute('aria-pressed', String(item.dataset.nodeId === id)));
+  panels.forEach(item => { item.hidden = item.id !== 'panel-' + id; });
+  positionAnchor();
+  if (updateUrl) history.replaceState(null, '', '#' + id);
+}
+nodes.forEach((node, index) => {
+  node.addEventListener('click', () => selectStep(node.dataset.nodeId));
+  node.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      selectStep(node.dataset.nodeId);
+    } else if (['ArrowRight', 'ArrowLeft', 'Home', 'End'].includes(event.key)) {
+      event.preventDefault();
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? nodes.length - 1
+        : (index + (event.key === 'ArrowRight' ? 1 : -1) + nodes.length) % nodes.length;
+      nodes[next].focus();
+      selectStep(nodes[next].dataset.nodeId);
+    }
+  });
+});
+window.addEventListener('hashchange', () => selectStep(location.hash.slice(1), false));
+window.addEventListener('resize', positionAnchor);
+document.querySelector('.diagram-scroll').addEventListener('scroll', positionAnchor);
+selectStep(location.hash.slice(1), false);
+document.fonts.ready.then(positionAnchor);
+</script></body></html>

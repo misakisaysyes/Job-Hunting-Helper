@@ -309,6 +309,9 @@ class TaskRunStoreTests(unittest.TestCase):
             self.assertEqual(config["mode"], "recommend")
             self.assertEqual(config["expect_id_prefixes"], ["abcdef"])
             self.assertEqual(config["target_jobs"], DEFAULT_CONFIG["collection"]["target_jobs"])
+            self.assertIn("cities", config)
+            self.assertNotIn("city", config)
+            self.assertNotIn("city_code", config)
             self.assertNotIn("resume_path", config)
             self.assertNotIn("api_key_env", config)
             run_id = runner.run_store.start(

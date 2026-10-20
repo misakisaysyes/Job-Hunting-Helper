@@ -37,7 +37,6 @@ def _display_config(config: dict) -> dict:
         "expect_id_prefixes": [item[:6] for item in collection["encrypt_expect_id"]],
         "keywords": collection["keywords"].copy(),
         "cities": collection["cities"].copy(),
-        "city": collection["city"],
         "max_pages": collection["max_pages"],
         "sort": collection["sort"],
         "target_jobs": collection["target_jobs"],

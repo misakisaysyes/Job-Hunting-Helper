@@ -1,8 +1,8 @@
 export const FIELD_LABELS = {
   collection: {
     platform: "采集平台", mode: "采集方式", encrypt_expect_id: "推荐流期望 ID",
-    keywords: "搜索关键词", cities: "城市", city: "城市",
-    city_code: "城市编码", max_pages: "每组最多页数", target_jobs: "本轮目标采集数",
+    keywords: "搜索关键词", cities: "城市",
+    max_pages: "每组最多页数", target_jobs: "本轮目标采集数",
     sort: "搜索排序", daily_search_page_limit: "每日列表页上限",
     daily_detail_page_limit: "每日详情页上限",
     max_consecutive_page_failures: "连续页面失败上限",
@@ -59,8 +59,6 @@ export const FIELD_HELP = {
   "collection.target_jobs": "达到预筛通过数后停止；启用 AI 评分时，须同时达到评分门槛。",
   "collection.max_pages": "每轮每个期望 ID 或城市与关键词组合最多读取的页数。",
   "collection.cities": "可多选；不选则按 BOSS 当前会话的城市搜索，城市编码自动匹配。",
-  "collection.city": "留空表示不指定城市，由 BOSS 当前会话决定范围。",
-  "collection.city_code": "城市未在内置映射中时填写。",
   "collection.collection_delay_multiplier": "1～5；数值越大，采集间隔越长。",
   "profile.education": "可多选；不选表示不限制岗位学历要求。",
   "profile.experience_filters": "可多选；不选表示不限制岗位工作年限要求。",

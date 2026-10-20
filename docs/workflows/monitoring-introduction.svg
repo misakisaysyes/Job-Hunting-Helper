@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="964" height="390" viewBox="0 0 964 390" role="img" aria-labelledby="monitoring-title monitoring-description">
+  <title id="monitoring-title">监测工作流</title>
+  <desc id="monitoring-description">仅沟通：读取未回复会话，判断追问条件，编辑并确认追问，记录成功结果。有交换：读取会话，核实附件简历回执，记录投递状态，汇总投递结果。</desc>
+  <!-- Adapted from the existing monitoring candidate.json; visual tokens follow collection-workflow.svg. -->
+  <style>
+    text { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif; }
+    .lane { fill:#fafcff; stroke:#dce6f2; stroke-width:1.25; }
+    .lane-title { fill:#26364d; font-size:17px; font-weight:650; }
+    .node { fill:#f5f9ff; stroke:#c4d9f1; stroke-width:1.25; }
+    .node-title { fill:#26364d; font-size:16px; font-weight:650; }
+    .detail { fill:#71829b; font-size:11px; }
+    .connector { fill:none; stroke:#9fb4cd; stroke-width:1.5; }
+    .arrow { fill:#9fb4cd; }
+    .footer { fill:#61748f; font-size:13px; }
+  </style>
+  <rect width="964" height="390" fill="#fff"/>
+  <rect class="lane" x="1" y="1" width="962" height="171" rx="14"/>
+  <text class="lane-title" x="24" y="33">仅沟通 · 跟进未回复会话</text>
+  <path class="connector" d="M 226 105 H 254"/>
+  <path class="arrow" d="M 250 101 L 258 105 L 250 109 Z"/>
+  <path class="connector" d="M 466 105 H 494"/>
+  <path class="arrow" d="M 490 101 L 498 105 L 490 109 Z"/>
+  <path class="connector" d="M 706 105 H 734"/>
+  <path class="arrow" d="M 730 101 L 738 105 L 730 109 Z"/>
+  <g>
+    <rect class="node" x="24" y="60" width="200" height="90" rx="11"/>
+    <text class="node-title" x="124" y="94" text-anchor="middle">读取未回复会话</text>
+    <text class="detail" x="124" y="119" text-anchor="middle">未读 / 已读未回</text>
+  </g>
+  <g>
+    <rect class="node" x="264" y="60" width="200" height="90" rx="11"/>
+    <text class="node-title" x="364" y="94" text-anchor="middle">判断追问条件</text>
+    <text class="detail" x="364" y="119" text-anchor="middle">冷却时间 / 有效期 / 次数上限</text>
+  </g>
+  <g>
+    <rect class="node" x="504" y="60" width="200" height="90" rx="11"/>
+    <text class="node-title" x="604" y="94" text-anchor="middle">编辑并确认追问</text>
+    <text class="detail" x="604" y="116" text-anchor="middle">原招呼语 / 手写 / AI 生成</text>
+    <text class="detail" x="604" y="133" text-anchor="middle">单条或批量发送</text>
+  </g>
+  <g>
+    <rect class="node" x="744" y="60" width="196" height="90" rx="11"/>
+    <text class="node-title" x="842" y="94" text-anchor="middle">记录已确认追问</text>
+    <text class="detail" x="842" y="119" text-anchor="middle">核实成功后才计次</text>
+  </g>
+  <rect class="lane" x="1" y="188" width="962" height="171" rx="14"/>
+  <text class="lane-title" x="24" y="220">有交换 · 核实附件简历投递</text>
+  <path class="connector" d="M 226 292 H 254"/>
+  <path class="arrow" d="M 250 288 L 258 292 L 250 296 Z"/>
+  <path class="connector" d="M 466 292 H 494"/>
+  <path class="arrow" d="M 490 288 L 498 292 L 490 296 Z"/>
+  <path class="connector" d="M 706 292 H 734"/>
+  <path class="arrow" d="M 730 288 L 738 292 L 730 296 Z"/>
+  <g>
+    <rect class="node" x="24" y="247" width="200" height="90" rx="11"/>
+    <text class="node-title" x="124" y="281" text-anchor="middle">读取有交换会话</text>
+    <text class="detail" x="124" y="306" text-anchor="middle">按配置的最近活动天数扫描</text>
+  </g>
+  <g>
+    <rect class="node" x="264" y="247" width="200" height="90" rx="11"/>
+    <text class="node-title" x="364" y="281" text-anchor="middle">核实附件简历回执</text>
+    <text class="detail" x="364" y="306" text-anchor="middle">发送成功 / 已被查看的回执</text>
+  </g>
+  <g>
+    <rect class="node" x="504" y="247" width="200" height="90" rx="11"/>
+    <text class="node-title" x="604" y="281" text-anchor="middle">记录投递状态</text>
+    <text class="detail" x="604" y="306" text-anchor="middle">已确认发送 / 未确认发送</text>
+  </g>
+  <g>
+    <rect class="node" x="744" y="247" width="196" height="90" rx="11"/>
+    <text class="node-title" x="842" y="281" text-anchor="middle">汇总投递结果</text>
+    <text class="detail" x="842" y="306" text-anchor="middle">用于转化统计与结果复盘</text>
+  </g>
+  <text class="footer" x="482" y="383" text-anchor="middle">两类任务均保留结果，可在工作台按日期查看桑基图与折线图。</text>
+</svg>

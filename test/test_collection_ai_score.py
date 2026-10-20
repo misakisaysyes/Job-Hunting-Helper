@@ -270,7 +270,7 @@ class AIScoreCollectionTests(unittest.TestCase):
             def close(self):
                 return None
 
-        self.config["collection"]["city"] = "北京"
+        self.config["collection"]["cities"] = ["北京"]
         with TemporaryDirectory() as directory:
             path = Path(directory) / "resume.md"
             path.write_text("做过浏览器性能优化", encoding="utf-8")

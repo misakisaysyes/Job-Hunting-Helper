@@ -42,7 +42,7 @@ function beijingDate(value) {
 function configSummary(config) {
   if (!config) return "配置暂不可用";
   const recommendSource = `推荐流（${config.expect_id_prefixes?.slice(0, 4).join("、") || "未配置期望"}${config.expect_id_prefixes?.length > 4 ? "等" : ""}）`;
-  const searchSource = `搜索流（${[config.cities?.join("、") || config.city, `${config.keywords?.length ?? 0} 个关键词`].filter(Boolean).join("，")}）`;
+  const searchSource = `搜索流（${[config.cities?.join("、") || "当前城市", `${config.keywords?.length ?? 0} 个关键词`].filter(Boolean).join("，")}）`;
   const source = config.mode === "both"
     ? `${recommendSource} + ${searchSource}`
     : config.mode === "search"
@@ -66,6 +66,7 @@ function basicConfigSummary(result) {
     mode: settings.collection.mode,
     expect_id_prefixes: settings.collection.encrypt_expect_id?.map((id) => id.slice(0, 6)),
     keywords: settings.collection.keywords,
+    cities: settings.collection.cities,
     target_jobs: result.preview?.collection?.target_jobs,
     use_ai_score: settings.ai?.use_ai_score,
     score_threshold: result.preview?.ai?.score_threshold,
@@ -81,7 +82,6 @@ function fullConfigSummary(settings) {
     expect_id_prefixes: collection.encrypt_expect_id?.map((id) => id.slice(0, 6)),
     keywords: collection.keywords,
     cities: collection.cities,
-    city: collection.city,
     target_jobs: collection.target_jobs,
     salary_min: profile?.salary_min,
     salary_max: profile?.salary_max,

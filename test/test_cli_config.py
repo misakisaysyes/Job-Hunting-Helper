@@ -130,14 +130,26 @@ class CliConfigTests(unittest.TestCase):
         resolved = self.resolve("--encrypt-expect-id", "third-id,fourth-id")
         self.assertEqual(resolved["collection"]["encrypt_expect_id"], ["third-id", "fourth-id"])
 
-    def test_boss_request_uses_config_mappings_and_custom_city_code(self) -> None:
-        config = self.resolve("--city", "自定义城市", "--city-code", "123456789",
+    def test_boss_request_maps_selected_cities_to_builtin_codes(self) -> None:
+        config = self.resolve("--search-city", "北京", "--search-city", "上海",
+                              "--search-city", "北京",
                               "--experience", "1年内,3-5")
         request = build_boss_request(config)
-        self.assertEqual(request.city_codes, {"自定义城市": "123456789"})
+        self.assertEqual(request.cities, ["北京", "上海"])
+        self.assertEqual(request.city_codes, {"北京": "101010100", "上海": "101020100"})
         self.assertEqual(request.filters["experience"], ["1年以内", "3-5年"])
         self.assertEqual(request.filters["degree"], ["本科"])
         self.assertEqual(request.filters["scale"], ["500-999人"])
+
+    def test_single_city_flags_have_been_removed(self) -> None:
+        for flag in ("--city", "--city-code"):
+            with self.subTest(flag=flag), redirect_stderr(StringIO()), self.assertRaises(SystemExit):
+                self.parser.parse_args([flag, "北京"])
+
+    def test_clear_search_city_restores_the_session_city(self) -> None:
+        self.defaults["collection"]["cities"] = ["北京"]
+        config = self.resolve("--clear-search-city")
+        self.assertEqual(build_boss_request(config).cities, [])
 
 
 if __name__ == "__main__":

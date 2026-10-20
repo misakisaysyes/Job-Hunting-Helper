@@ -48,13 +48,9 @@ def build_boss_request(config: dict[str, Any]) -> PlatformCollectionRequest:
         if selected:
             filters[api_key] = [labels[value] for value in selected]
 
-    city = collection["city"]
-    city_code = (collection["city_code"] or CITY_CODES.get(city, "")) if city else ""
     selected_cities = collection["cities"] if collection["mode"] in {"search", "both"} else []
-    cities = list(dict.fromkeys([*selected_cities, *([city] if city else [])]))
+    cities = list(dict.fromkeys(selected_cities))
     city_codes = {selected: CITY_CODES[selected] for selected in cities if selected in CITY_CODES}
-    if city and city_code:
-        city_codes[city] = city_code
     return PlatformCollectionRequest(
         platform=collection["platform"], mode=collection["mode"], keywords=collection["keywords"],
         cities=cities, city_codes=city_codes,
