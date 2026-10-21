@@ -1,5 +1,6 @@
 .venv/
 .state/
+.archify/
 data/resumes/
 data/*.db
 data/*.sqlite3

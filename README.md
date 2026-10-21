@@ -1,8 +1,6 @@
 # Job Hunting Helper
 
-![Job Hunting Helper 功能演示（1080p，40 秒）](docs/video-assets/job-hunting-helper.gif)
-
-[查看 1080p 完整演示视频（40 秒，含配乐）](docs/video-assets/job-hunting-helper.mp4)
+![Job Hunting Helper 功能演示（1080p，40 秒）](docs/video-assets/new-job-hunting-helper.gif)
 
 Job Hunting Helper 是面向 BOSS 直聘的本地求职助手，用 AI 和批量操作完成岗位采集、筛选、招呼与追问，并统计投递转化。
 
