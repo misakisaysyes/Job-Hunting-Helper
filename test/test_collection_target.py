@@ -121,6 +121,7 @@ class CollectionTargetTests(unittest.TestCase):
         self.assertEqual(result.reason_code, "target_reached")
         self.assertEqual(result.counts["new"], 2)
         self.assertEqual(result.counts["duplicate_jobs"], 0)
+        self.assertEqual(result.counts["seen"], 2)
         self.assertEqual({record["source_job_id"]: record["source_mode"] for record in records},
                          {"same": "recommend", "search-only": "search"})
 
@@ -307,7 +308,8 @@ class CollectionTargetTests(unittest.TestCase):
 
         self.assertEqual(result.counts["duplicate_jobs"], 1)
         self.assertEqual(result.counts["new"], 1)
-        self.assertEqual(result.counts["seen"], 8)
+        self.assertEqual(result.counts["seen"], 2)
+        self.assertEqual(max(item["seen"] for item in progress), 2)
         self.assertTrue(any(item.get("duplicate_jobs") == 1 for item in progress))
         self.assertTrue(any(item.get("new") == 1 and item.get("qualified") == 1
                             for item in progress))

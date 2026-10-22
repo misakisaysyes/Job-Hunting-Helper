@@ -50,12 +50,12 @@ class CollectionOrchestrator:
                 on_event(message)
 
         def inspect(candidate: JobCandidate) -> bool:
-            counts["seen"] += 1
             key = (candidate.platform, candidate.source_job_id)
             if key in seen_ids:
                 publish_counts()
                 return False
             seen_ids.add(key)
+            counts["seen"] = len(seen_ids)
             if self.already_collected(*key):
                 counts["duplicate_jobs"] += 1
                 publish_counts()
